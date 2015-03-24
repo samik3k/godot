@@ -27,6 +27,8 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
 #import <Cocoa/Cocoa.h>
+
+#include <Carbon/Carbon.h>
 #include <IOKit/IOKitLib.h>
 #include <IOKit/IOCFPlugIn.h>
 #include <IOKit/hid/IOHIDLib.h>
@@ -378,20 +380,17 @@ static int button_mask=0;
 	prev_mouse_y=mouse_y;
 	const NSRect contentRect = [OS_OSX::singleton->window_view frame];
 	const NSPoint p = [event locationInWindow];
-	mouse_x = p.x;
-	mouse_y = contentRect.size.height - p.y;
+	mouse_x = p.x * [[event window] backingScaleFactor];
+	mouse_y = (contentRect.size.height - p.y) * [[event window] backingScaleFactor];
 	ev.mouse_motion.x=mouse_x;
 	ev.mouse_motion.y=mouse_y;
 	ev.mouse_motion.global_x=mouse_x;
 	ev.mouse_motion.global_y=mouse_y;
-	ev.mouse_motion.relative_x=mouse_x - prev_mouse_x;
-	ev.mouse_motion.relative_y=mouse_y - prev_mouse_y;
+	ev.mouse_motion.relative_x=[event deltaX] * [[event window] backingScaleFactor];
+    ev.mouse_motion.relative_y=[event deltaY] * [[event window] backingScaleFactor];
 	ev.mouse_motion.mod = translateFlags([event modifierFlags]);
 
-
-//	ev.mouse_motion.relative_x=[event deltaX];
-//	ev.mouse_motion.relative_y=[event deltaY];
-
+	OS_OSX::singleton->input->set_mouse_pos(Point2(mouse_x,mouse_y));
 	OS_OSX::singleton->push_input(ev);
 
 
@@ -697,7 +696,7 @@ static int translateKey(unsigned int key)
     ev.type=InputEvent::KEY;
     ev.key.pressed=true;
     ev.key.mod=translateFlags([event modifierFlags]);
-    ev.key.scancode = translateKey([event keyCode]);
+    ev.key.scancode = latin_keyboard_keycode_convert(translateKey([event keyCode]));
     ev.key.echo = [event isARepeat];
 
     NSString* characters = [event characters];
@@ -743,7 +742,7 @@ static int translateKey(unsigned int key)
 	ev.type=InputEvent::KEY;
 	ev.key.pressed=false;
 	ev.key.mod=translateFlags([event modifierFlags]);
-	ev.key.scancode = translateKey([event keyCode]);
+	ev.key.scancode = latin_keyboard_keycode_convert(translateKey([event keyCode]));
 	OS_OSX::singleton->push_input(ev);
 
 
@@ -838,23 +837,35 @@ void OS_OSX::initialize_core() {
 
 }
 
+static bool keyboard_layout_dirty = true;
+static void keyboardLayoutChanged(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+	keyboard_layout_dirty = true;
+}
+
 void OS_OSX::initialize(const VideoMode& p_desired,int p_video_driver,int p_audio_driver) {
 
 	/*** OSX INITIALIZATION ***/
 	/*** OSX INITIALIZATION ***/
 	/*** OSX INITIALIZATION ***/
 
-	current_videomode=p_desired;
+	keyboard_layout_dirty = true;
+
+	// Register to be notified on keyboard layout changes
+	CFNotificationCenterAddObserver(CFNotificationCenterGetDistributedCenter(),
+									NULL, keyboardLayoutChanged,
+									kTISNotifySelectedKeyboardInputSourceChanged, NULL,
+									CFNotificationSuspensionBehaviorDeliverImmediately);
+    
 	window_delegate = [[GodotWindowDelegate alloc] init];
 
        // Don't use accumulation buffer support; it's not accelerated
        // Aux buffers probably aren't accelerated either
 
-	unsigned int styleMask = NSTitledWindowMask | NSClosableWindowMask | NSMiniaturizableWindowMask | (current_videomode.resizable?NSResizableWindowMask:0);
+	unsigned int styleMask = NSTitledWindowMask | NSClosableWindowMask | NSMiniaturizableWindowMask | (p_desired.resizable?NSResizableWindowMask:0);
 
 
 	window_object = [[GodotWindow alloc]
-	    initWithContentRect:NSMakeRect(0, 0, current_videomode.width,current_videomode.height)
+	    initWithContentRect:NSMakeRect(0, 0, p_desired.width, p_desired.height)
 		      styleMask:styleMask
 			backing:NSBackingStoreBuffered
 			  defer:NO];
@@ -862,6 +873,13 @@ void OS_OSX::initialize(const VideoMode& p_desired,int p_video_driver,int p_audi
 	ERR_FAIL_COND( window_object==nil );
 
 	window_view = [[GodotContentView alloc] init];
+
+	current_videomode = p_desired;
+
+	// Adjust for display density
+	const NSRect fbRect = convertRectToBacking(NSMakeRect(0, 0, p_desired.width, p_desired.height));
+	current_videomode.width = fbRect.size.width;
+	current_videomode.height = fbRect.size.height;
 
 #if MAC_OS_X_VERSION_MAX_ALLOWED >= 1070
 	if (floor(NSAppKitVersionNumber) > NSAppKitVersionNumber10_6) {
@@ -1004,6 +1022,8 @@ void OS_OSX::initialize(const VideoMode& p_desired,int p_video_driver,int p_audi
 }
 void OS_OSX::finalize() {
 
+	CFNotificationCenterRemoveObserver(CFNotificationCenterGetDistributedCenter(), NULL, kTISNotifySelectedKeyboardInputSourceChanged, NULL);
+
 }
 
 void OS_OSX::set_main_loop( MainLoop * p_main_loop ) {
@@ -1064,6 +1084,36 @@ bool OS_OSX::is_mouse_grab_enabled() const {
 
 	return mouse_grab;
 }
+
+void OS_OSX::warp_mouse_pos(const Point2& p_to) {
+
+    //copied from windows impl with osx native calls
+    if (mouse_mode == MOUSE_MODE_CAPTURED){
+        mouse_x = p_to.x;
+        mouse_y = p_to.y;
+    }
+    else{ //set OS position
+        
+	/* this code has not been tested, please be a kind soul and fix it if it fails! */
+
+	//local point in window coords
+	NSPoint localPoint = { p_to.x, p_to.y };
+
+	NSPoint pointInWindow = [window_view convertPoint:localPoint toView:nil];
+	NSPoint pointOnScreen = [[window_view window] convertRectToScreen:(NSRect){.origin=pointInWindow}].origin;
+
+	//point in scren coords
+	CGPoint lMouseWarpPos = { pointOnScreen.x, pointOnScreen.y};
+
+	//do the warping
+        CGEventSourceRef lEventRef = CGEventSourceCreate(kCGEventSourceStateCombinedSessionState);
+        CGEventSourceSetLocalEventsSuppressionInterval(lEventRef, 0.0);
+        CGAssociateMouseAndMouseCursorPosition(false);
+        CGWarpMouseCursorPosition(lMouseWarpPos);
+        CGAssociateMouseAndMouseCursorPosition(true);
+    }
+}
+
 Point2 OS_OSX::get_mouse_pos() const {
 
 	return Vector2(mouse_x,mouse_y);
@@ -1195,6 +1245,10 @@ void OS_OSX::get_fullscreen_mode_list(List<VideoMode> *p_list,int p_screen) cons
 
 }
 
+Size2 OS_OSX::get_window_size() const {
+	return Vector2(current_videomode.width, current_videomode.height);
+}
+
 void OS_OSX::move_window_to_foreground() {
 
 	[window_object orderFrontRegardless];
@@ -1219,6 +1273,83 @@ String OS_OSX::get_executable_path() const {
 
 }
 
+// Returns string representation of keys, if they are printable.
+//
+static NSString *createStringForKeys(const CGKeyCode *keyCode, int length) {
+
+	TISInputSourceRef currentKeyboard = TISCopyCurrentKeyboardInputSource();
+	if (!currentKeyboard)
+		return nil;
+
+	CFDataRef layoutData = (CFDataRef)TISGetInputSourceProperty(currentKeyboard, kTISPropertyUnicodeKeyLayoutData);
+	if (!layoutData)
+		return nil;
+
+	const UCKeyboardLayout *keyboardLayout = (const UCKeyboardLayout *)CFDataGetBytePtr(layoutData);
+
+	OSStatus err;
+	CFMutableStringRef output = CFStringCreateMutable(NULL, 0);
+
+	for (int i=0; i<length; ++i) {
+
+		UInt32 keysDown = 0;
+		UniChar chars[4];
+		UniCharCount realLength;
+
+		err = UCKeyTranslate(keyboardLayout,
+					   keyCode[i],
+					   kUCKeyActionDisplay,
+					   0,
+					   LMGetKbdType(),
+					   kUCKeyTranslateNoDeadKeysBit,
+					   &keysDown,
+					   sizeof(chars) / sizeof(chars[0]),
+					   &realLength,
+					   chars);
+
+		if (err != noErr) {
+			CFRelease(output);
+			return nil;
+		}
+
+		CFStringAppendCharacters(output, chars, 1);
+	}
+
+	//CFStringUppercase(output, NULL);
+
+	return (NSString *)output;
+}
+OS::LatinKeyboardVariant OS_OSX::get_latin_keyboard_variant() const {
+
+	static LatinKeyboardVariant layout = LATIN_KEYBOARD_QWERTY;
+
+	if (keyboard_layout_dirty) {
+
+		layout = LATIN_KEYBOARD_QWERTY;
+
+		CGKeyCode keys[] = {kVK_ANSI_Q, kVK_ANSI_W, kVK_ANSI_E, kVK_ANSI_R, kVK_ANSI_T, kVK_ANSI_Y};
+		NSString *test = createStringForKeys(keys, 6);
+
+		if ([test isEqualToString:@"qwertz"]) {
+			layout = LATIN_KEYBOARD_QWERTZ;
+		} else if ([test isEqualToString:@"azerty"]) {
+			layout = LATIN_KEYBOARD_AZERTY;
+		} else if ([test isEqualToString:@"qzerty"]) {
+			layout = LATIN_KEYBOARD_QZERTY;
+		} else if ([test isEqualToString:@"',.pyf"]) {
+			layout = LATIN_KEYBOARD_DVORAK;
+		} else if ([test isEqualToString:@"xvlcwk"]) {
+			layout = LATIN_KEYBOARD_NEO;
+		}
+
+		[test release];
+
+		keyboard_layout_dirty = false;
+		return layout;
+	}
+
+	return layout;
+}
 
 void OS_OSX::process_events() {
 
@@ -1272,11 +1403,38 @@ void OS_OSX::run() {
 	main_loop->finish();
 }
 
+void OS_OSX::set_mouse_mode(MouseMode p_mode) {
+
+    if (p_mode==mouse_mode)
+        return;
+
+    if (p_mode==MOUSE_MODE_CAPTURED) {
+        // Apple Docs state that the display parameter is not used.
+        // "This parameter is not used. By default, you may pass kCGDirectMainDisplay."
+        // https://developer.apple.com/library/mac/documentation/graphicsimaging/reference/Quartz_Services_Ref/Reference/reference.html
+        CGDisplayHideCursor(kCGDirectMainDisplay);
+        CGAssociateMouseAndMouseCursorPosition(false);
+    } else if (p_mode==MOUSE_MODE_HIDDEN) {
+        CGDisplayHideCursor(kCGDirectMainDisplay);
+        CGAssociateMouseAndMouseCursorPosition(true);
+    } else {
+        CGDisplayShowCursor(kCGDirectMainDisplay);
+        CGAssociateMouseAndMouseCursorPosition(true);
+    }
+
+    mouse_mode=p_mode;
+}
+
+OS::MouseMode OS_OSX::get_mouse_mode() const {
+
+    return mouse_mode;
+}
 
 OS_OSX* OS_OSX::singleton=NULL;
 
 OS_OSX::OS_OSX() {
 
+	main_loop=NULL;
 	singleton=this;
 	autoreleasePool = [[NSAutoreleasePool alloc] init];
 

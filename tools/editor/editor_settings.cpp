@@ -30,7 +30,7 @@
 #include "os/os.h"
 #include "os/dir_access.h"
 #include "os/file_access.h"
-#include "io/object_format_xml.h"
+
 #include "version.h"
 #include "scene/main/scene_main_loop.h"
 #include "os/os.h"
@@ -321,7 +321,7 @@ void EditorSettings::scan_plugins() {
 	d->list_dir_begin();
 
 	String base = d->get_current_dir();
-	print_line("list diring on: "+base);
+	//print_line("list diring on: "+base);
 	while(true) {
 		String p = d->get_next();
 		if (p=="")
@@ -384,6 +384,15 @@ void EditorSettings::_load_defaults() {
 
 	_THREAD_SAFE_METHOD_
 
+	set("global/font","");
+	hints["global/font"]=PropertyInfo(Variant::STRING,"global/font",PROPERTY_HINT_GLOBAL_FILE,"*.fnt");
+	set("global/autoscan_project_path","");
+	hints["global/autoscan_project_path"]=PropertyInfo(Variant::STRING,"global/autoscan_project_path",PROPERTY_HINT_GLOBAL_DIR);
+	set("global/default_project_path","");
+	hints["global/default_project_path"]=PropertyInfo(Variant::STRING,"global/default_project_path",PROPERTY_HINT_GLOBAL_DIR);
+	set("global/default_project_export_path","");
+	hints["global/default_project_export_path"]=PropertyInfo(Variant::STRING,"global/default_project_export_path",PROPERTY_HINT_GLOBAL_DIR);
+
 	set("text_editor/background_color",Color::html("3b000000"));
 	set("text_editor/text_color",Color::html("aaaaaa"));
 	set("text_editor/text_selected_color",Color::html("000000"));
@@ -394,15 +403,29 @@ void EditorSettings::_load_defaults() {
 	set("text_editor/string_color",Color::html("ef6ebe"));
 	set("text_editor/symbol_color",Color::html("badfff"));
 	set("text_editor/selection_color",Color::html("7b5dbe"));
+	set("text_editor/brace_mismatch_color",Color(1,0.2,0.2));
+	set("text_editor/current_line_color",Color(0.3,0.5,0.8,0.15));
 
 	set("text_editor/idle_parse_delay",2);
 	set("text_editor/create_signal_callbacks",true);
 	set("text_editor/autosave_interval_seconds",60);
+	set("text_editor/font","");
+	hints["text_editor/font"]=PropertyInfo(Variant::STRING,"text_editor/font",PROPERTY_HINT_GLOBAL_FILE,"*.fnt");
+	set("text_editor/auto_brace_complete", false);
+
+
+	set("scenetree_editor/duplicate_node_name_num_separator",0);
+	hints["scenetree_editor/duplicate_node_name_num_separator"]=PropertyInfo(Variant::INT,"scenetree_editor/duplicate_node_name_num_separator",PROPERTY_HINT_ENUM, "None,Space,Underscore,Dash");
+
 
 	set("3d_editor/default_fov",45.0);
 	set("3d_editor/default_z_near",0.1);
 	set("3d_editor/default_z_far",500.0);
 
+	set("3d_editor/navigation_scheme",0);
+	hints["3d_editor/navigation_scheme"]=PropertyInfo(Variant::INT,"3d_editor/navigation_scheme",PROPERTY_HINT_ENUM,"Godot,Maya,Modo");
+	set("3d_editor/zoom_style",0);
+	hints["3d_editor/zoom_style"]=PropertyInfo(Variant::INT,"3d_editor/zoom_style",PROPERTY_HINT_ENUM,"Vertical, Horizontal");
 	set("3d_editor/orbit_modifier",0);
 	hints["3d_editor/orbit_modifier"]=PropertyInfo(Variant::INT,"3d_editor/orbit_modifier",PROPERTY_HINT_ENUM,"None,Shift,Alt,Meta,Ctrl");
 	set("3d_editor/pan_modifier",1);
@@ -410,42 +433,52 @@ void EditorSettings::_load_defaults() {
 	set("3d_editor/zoom_modifier",4);
 	hints["3d_editor/zoom_modifier"]=PropertyInfo(Variant::INT,"3d_editor/zoom_modifier",PROPERTY_HINT_ENUM,"None,Shift,Alt,Meta,Ctrl");
 
+	set("2d_editor/bone_width",5);
+	set("2d_editor/bone_color1",Color(1.0,1.0,1.0,0.9));
+	set("2d_editor/bone_color2",Color(0.75,0.75,0.75,0.9));
+	set("2d_editor/bone_selected_color",Color(0.9,0.45,0.45,0.9));
+	set("2d_editor/bone_ik_color",Color(0.9,0.9,0.45,0.9));
+
 	set("on_save/compress_binary_resources",true);
 	set("on_save/save_modified_external_resources",true);
 	set("on_save/save_paths_as_relative",false);
-	set("on_save/save_paths_without_extension",true);
+	set("on_save/save_paths_without_extension",false);
 
 	set("text_editor/create_signal_callbacks",true);
 
+	set("file_dialog/show_hidden_files", false);
 
 	set("animation/autorename_animation_tracks",true);
+	set("animation/confirm_insert_track",true);
 
 	set("property_editor/texture_preview_width",48);
+	set("property_editor/auto_refresh_interval",0.3);
 	set("help/doc_path","");
 
 	set("import/ask_save_before_reimport",false);
 
 	set("import/pvrtc_texture_tool","");
 #ifdef WINDOWS_ENABLED
-	hints["import/pvrtc_texture_tool"]=PropertyInfo(Variant::STRING,"import/pvrtc_texture_tool",PROPERTY_HINT_FILE,"*.exe");
+	hints["import/pvrtc_texture_tool"]=PropertyInfo(Variant::STRING,"import/pvrtc_texture_tool",PROPERTY_HINT_GLOBAL_FILE,"*.exe");
 #else
-	hints["import/pvrtc_texture_tool"]=PropertyInfo(Variant::STRING,"import/pvrtc_texture_tool",PROPERTY_HINT_FILE,"");
+	hints["import/pvrtc_texture_tool"]=PropertyInfo(Variant::STRING,"import/pvrtc_texture_tool",PROPERTY_HINT_GLOBAL_FILE,"");
 #endif
 	set("PVRTC/fast_conversion",false);
 
 
 	set("run/auto_save_before_running",true);
 	set("resources/save_compressed_resources",true);
+	set("resources/auto_reload_modified_images",true);
 }
 
 void EditorSettings::notify_changes() {
 
 	_THREAD_SAFE_METHOD_
 
-	SceneMainLoop *sml=NULL;
+	SceneTree *sml=NULL;
 
 	if (OS::get_singleton()->get_main_loop())
-		sml = OS::get_singleton()->get_main_loop()->cast_to<SceneMainLoop>();
+		sml = OS::get_singleton()->get_main_loop()->cast_to<SceneTree>();
 
 	if (!sml) {
 		print_line("not SML");

@@ -90,7 +90,8 @@ struct Vector2 {
 	float distance_to(const Vector2& p_vector2) const; 
 	float distance_squared_to(const Vector2& p_vector2) const;
 	float angle_to(const Vector2& p_vector2) const;
-	
+	float angle_to_point(const Vector2& p_vector2) const;
+
 	float dot(const Vector2& p_other) const;
 	float cross(const Vector2& p_other) const;
 	Vector2 cross(real_t p_other) const;
@@ -105,6 +106,8 @@ struct Vector2 {
 	Vector2 cubic_interpolate(const Vector2& p_b,const Vector2& p_pre_a, const Vector2& p_post_b,float p_t) const;
 	Vector2 cubic_interpolate_soft(const Vector2& p_b,const Vector2& p_pre_a, const Vector2& p_post_b,float p_t) const;
 
+	Vector2 slide(const Vector2& p_vec) const;
+	Vector2 reflect(const Vector2& p_vec) const;
 
 	Vector2 operator+(const Vector2& p_v) const;
 	void operator+=(const Vector2& p_v);
@@ -156,8 +159,8 @@ struct Vector2 {
 	
 	operator String() const { return String::num(x)+","+String::num(y); }
 	
-	inline Vector2(float p_x,float p_y) { x=p_x; y=p_y; }
-	inline Vector2() { x=0; y=0; }
+	_FORCE_INLINE_ Vector2(float p_x,float p_y) { x=p_x; y=p_y; }
+	_FORCE_INLINE_ Vector2() { x=0; y=0; }
 };
 
 _FORCE_INLINE_ Vector2 Vector2::plane_project(real_t p_d, const Vector2& p_vec) const {
@@ -195,6 +198,8 @@ Vector2 Vector2::linear_interpolate(const Vector2& p_a, const Vector2& p_b,float
 typedef Vector2 Size2;
 typedef Vector2 Point2;
 
+struct Matrix32;
+
 
 struct Rect2 {
 	
@@ -220,6 +225,8 @@ struct Rect2 {
 		
 		return true;
 	}
+
+	_FORCE_INLINE_ bool intersects_transformed(const Matrix32& p_xform, const Rect2& p_rect) const;
 
 	bool intersects_segment(const Point2& p_from, const Point2& p_to, Point2* r_pos=NULL, Point2* r_normal=NULL) const;
 
@@ -270,7 +277,7 @@ struct Rect2 {
 		
 		return new_rect;
 	};
-	bool has_point(const Point2& p_point) const {
+	inline bool has_point(const Point2& p_point) const {
 		if (p_point.x < pos.x)
 			return false; 
 		if (p_point.y < pos.y)
@@ -284,12 +291,12 @@ struct Rect2 {
 		return true;
 	}
 	
-	bool no_area() const { return (size.width<=0 || size.height<=0 ); }
+	inline bool no_area() const { return (size.width<=0 || size.height<=0 ); }
 	
 	bool operator==(const Rect2& p_rect) const { return pos==p_rect.pos && size==p_rect.size; }
 	bool operator!=(const Rect2& p_rect) const { return pos!=p_rect.pos || size!=p_rect.size; }
 	
-	Rect2 grow(real_t p_by) const {
+	inline Rect2 grow(real_t p_by) const {
 		
 		Rect2 g=*this;
 		g.pos.x-=p_by;
@@ -461,7 +468,7 @@ struct Rect2i {
 
 		return new_rect;
 	};
-	bool has_point(const Point2& p_point) {
+	bool has_point(const Point2& p_point) const {
 		if (p_point.x < pos.x)
 			return false;
 		if (p_point.y < pos.y)
@@ -551,6 +558,9 @@ struct Matrix32 {
 	void scale_basis(const Vector2& p_scale);
 	void translate( real_t p_tx, real_t p_ty);
 	void translate( const Vector2& p_translation );
+
+	float basis_determinant() const;
+
 	Vector2 get_scale() const;
 
 	_FORCE_INLINE_ const Vector2& get_origin() const { return elements[2]; }
@@ -591,6 +601,160 @@ struct Matrix32 {
 
 };
 
+bool Rect2::intersects_transformed(const Matrix32& p_xform, const Rect2& p_rect) const {
+
+	//SAT intersection between local and transformed rect2
+
+	Vector2 xf_points[4]={
+		p_xform.xform(p_rect.pos),
+		p_xform.xform(Vector2(p_rect.pos.x+p_rect.size.x,p_rect.pos.y)),
+		p_xform.xform(Vector2(p_rect.pos.x,p_rect.pos.y+p_rect.size.y)),
+		p_xform.xform(Vector2(p_rect.pos.x+p_rect.size.x,p_rect.pos.y+p_rect.size.y)),
+	};
+
+	real_t low_limit;
+
+	//base rect2 first (faster)
+
+	if (xf_points[0].y>pos.y)
+		goto next1;
+	if (xf_points[1].y>pos.y)
+		goto next1;
+	if (xf_points[2].y>pos.y)
+		goto next1;
+	if (xf_points[3].y>pos.y)
+		goto next1;
+
+	return false;
+
+	next1:
+
+	low_limit=pos.y+size.y;
+
+	if (xf_points[0].y<low_limit)
+		goto next2;
+	if (xf_points[1].y<low_limit)
+		goto next2;
+	if (xf_points[2].y<low_limit)
+		goto next2;
+	if (xf_points[3].y<low_limit)
+		goto next2;
+
+	return false;
+
+	next2:
+
+	if (xf_points[0].x>pos.x)
+		goto next3;
+	if (xf_points[1].x>pos.x)
+		goto next3;
+	if (xf_points[2].x>pos.x)
+		goto next3;
+	if (xf_points[3].x>pos.x)
+		goto next3;
+
+	return false;
+
+	next3:
+
+	low_limit=pos.x+size.x;
+
+	if (xf_points[0].x<low_limit)
+		goto next4;
+	if (xf_points[1].x<low_limit)
+		goto next4;
+	if (xf_points[2].x<low_limit)
+		goto next4;
+	if (xf_points[3].x<low_limit)
+		goto next4;
+
+	return false;
+
+	next4:
+
+	Vector2 xf_points2[4]={
+		pos,
+		Vector2(pos.x+size.x,pos.y),
+		Vector2(pos.x,pos.y+size.y),
+		Vector2(pos.x+size.x,pos.y+size.y),
+	};
+
+	real_t maxa=p_xform.elements[0].dot(xf_points2[0]);
+	real_t mina=maxa;
+
+	real_t dp = p_xform.elements[0].dot(xf_points2[1]);
+	maxa=MAX(dp,maxa);
+	mina=MIN(dp,mina);
+
+	dp = p_xform.elements[0].dot(xf_points2[2]);
+	maxa=MAX(dp,maxa);
+	mina=MIN(dp,mina);
+
+	dp = p_xform.elements[0].dot(xf_points2[3]);
+	maxa=MAX(dp,maxa);
+	mina=MIN(dp,mina);
+
+	real_t maxb=p_xform.elements[0].dot(xf_points[0]);
+	real_t minb=maxb;
+
+	dp = p_xform.elements[0].dot(xf_points[1]);
+	maxb=MAX(dp,maxb);
+	minb=MIN(dp,minb);
+
+	dp = p_xform.elements[0].dot(xf_points[2]);
+	maxb=MAX(dp,maxb);
+	minb=MIN(dp,minb);
+
+	dp = p_xform.elements[0].dot(xf_points[3]);
+	maxb=MAX(dp,maxb);
+	minb=MIN(dp,minb);
+
+
+	if ( mina > maxb )
+		return false;
+	if ( minb > maxa  )
+		return false;
+
+	maxa=p_xform.elements[1].dot(xf_points2[0]);
+	mina=maxa;
+
+	dp = p_xform.elements[1].dot(xf_points2[1]);
+	maxa=MAX(dp,maxa);
+	mina=MIN(dp,mina);
+
+	dp = p_xform.elements[1].dot(xf_points2[2]);
+	maxa=MAX(dp,maxa);
+	mina=MIN(dp,mina);
+
+	dp = p_xform.elements[1].dot(xf_points2[3]);
+	maxa=MAX(dp,maxa);
+	mina=MIN(dp,mina);
+
+	maxb=p_xform.elements[1].dot(xf_points[0]);
+	minb=maxb;
+
+	dp = p_xform.elements[1].dot(xf_points[1]);
+	maxb=MAX(dp,maxb);
+	minb=MIN(dp,minb);
+
+	dp = p_xform.elements[1].dot(xf_points[2]);
+	maxb=MAX(dp,maxb);
+	minb=MIN(dp,minb);
+
+	dp = p_xform.elements[1].dot(xf_points[3]);
+	maxb=MAX(dp,maxb);
+	minb=MIN(dp,minb);
+
+
+	if ( mina > maxb )
+		return false;
+	if ( minb > maxa  )
+		return false;
+
+
+	return true;
+
+}
 
 Vector2 Matrix32::basis_xform(const Vector2& v) const {
 

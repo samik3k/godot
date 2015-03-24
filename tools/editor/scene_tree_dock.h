@@ -75,7 +75,7 @@ class SceneTreeDock : public VBoxContainer {
 	SceneTreeEditor *scene_tree;
 
 	HBoxContainer *tool_hbc;
-	void _tool_selected(int p_tool);
+	void _tool_selected(int p_tool, bool p_confirm_override = false);
 
 	EditorData *editor_data;
 	EditorSelection *editor_selection;
@@ -102,8 +102,10 @@ class SceneTreeDock : public VBoxContainer {
 	void _load_request(const String& p_path);
 	void _script_open_request(const Ref<Script>& p_script);
 
+	bool _cyclical_dependency_exists(const String& p_target_scene_path, Node* p_desired_node);
 
 	void _node_selected();
+	void _node_renamed();
 	void _script_created(Ref<Script> p_script);
 
 	void _delete_confirm();
@@ -115,6 +117,7 @@ class SceneTreeDock : public VBoxContainer {
 
 	void _import_subscene();
 
+	bool _validate_no_foreign();
 
 	void _fill_path_renames(Vector<StringName> base_path,Vector<StringName> new_base_path,Node * p_node, List<Pair<NodePath,NodePath> > *p_renames);
 
@@ -127,7 +130,7 @@ public:
 	void import_subscene();
 	void set_edited_scene(Node* p_scene);
 	Node* instance(const String& p_path);
-	void set_selected(Node *p_node);
+	void set_selected(Node *p_node, bool p_emit_selected=false);
 	void fill_path_renames(Node* p_node, Node *p_new_parent, List<Pair<NodePath,NodePath> > *p_renames);
 	void perform_node_renames(Node* p_base,List<Pair<NodePath,NodePath> > *p_renames, Map<Ref<Animation>, Set<int> > *r_rem_anims=NULL);
 

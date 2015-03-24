@@ -65,6 +65,7 @@
 #include "tools/editor/scene_tree_dock.h"
 #include "tools/editor/resources_dock.h"
 #include "tools/editor/optimized_save_dialog.h"
+#include "tools/editor/editor_run_script.h"
 
 #include "tools/editor/editor_run_native.h"
 #include "scene/gui/tabs.h"
@@ -90,6 +91,9 @@
 
 
 
+
+typedef void (*EditorNodeInitCallback)();
+
 class EditorNode : public Node {
 
 	OBJ_TYPE( EditorNode, Node );
@@ -104,6 +108,8 @@ class EditorNode : public Node {
 		FILE_OPEN_SCENE,
 		FILE_SAVE_SCENE,
 		FILE_SAVE_AS_SCENE,
+		FILE_SAVE_BEFORE_RUN,
+		FILE_SAVE_AND_RUN,
 		FILE_IMPORT_SUBSCENE,
 		FILE_EXPORT_PROJECT,
 		FILE_EXPORT_MESH_LIBRARY,
@@ -115,11 +121,13 @@ class EditorNode : public Node {
 		FILE_OPEN_OLD_SCENE,
 		FILE_QUICK_OPEN_SCENE,
 		FILE_QUICK_OPEN_SCRIPT,
+		FILE_RUN_SCRIPT,
 		FILE_OPEN_PREV,
 		FILE_QUIT,
 		FILE_EXTERNAL_OPEN_SCENE,
 		EDIT_UNDO,
 		EDIT_REDO,
+		EDIT_REVERT,
 		RESOURCE_NEW,
 		RESOURCE_LOAD,
 		RESOURCE_SAVE,
@@ -128,6 +136,7 @@ class EditorNode : public Node {
 		RESOURCE_COPY,
 		OBJECT_COPY_PARAMS,
 		OBJECT_PASTE_PARAMS,
+		OBJECT_UNIQUE_RESOURCES,
 		OBJECT_CALL_METHOD,
 		OBJECT_REQUEST_HELP,
 		RUN_PLAY,
@@ -137,6 +146,7 @@ class EditorNode : public Node {
 		RUN_PLAY_CUSTOM_SCENE,
 		RUN_SCENE_SETTINGS,
 		RUN_SETTINGS,
+		RUN_PROJECT_MANAGER,
 		RUN_FILE_SERVER,
 		RUN_DEPLOY_DUMB_CLIENTS,
 		SETTINGS_UPDATE_ALWAYS,
@@ -150,7 +160,7 @@ class EditorNode : public Node {
 		SETTINGS_HELP,
 		SETTINGS_ABOUT,
 		SOURCES_REIMPORT,
-		DEPENDENCY_UPDATE_LOCAL,
+		DEPENDENCY_LOAD_CHANGED_IMAGES,
 		DEPENDENCY_UPDATE_IMPORTED,
 
 		IMPORT_PLUGIN_BASE=100,
@@ -205,6 +215,7 @@ class EditorNode : public Node {
 	AcceptDialog *load_error_dialog;
 
 	Control *scene_root_base;
+	Ref<Theme> theme;
 
 	PopupMenu *recent_scenes;
 	Button *property_back;
@@ -221,6 +232,7 @@ class EditorNode : public Node {
 	ConfirmationDialog *open_recent_confirmation;
 	AcceptDialog *accept;
 	AcceptDialog *about;
+	AcceptDialog *warning;
 
 	//OptimizedPresetsDialog *optimized_presets;
 	EditorSettingsDialog *settings_config_dialog;
@@ -230,6 +242,7 @@ class EditorNode : public Node {
 	FileDialog *file_templates;
 	FileDialog *file_export;
 	FileDialog *file_export_lib;
+	FileDialog *file_script;
 	CheckButton *file_export_check;
 	CheckButton *file_export_lib_merge;
 	LineEdit *file_export_password;
@@ -328,6 +341,8 @@ class EditorNode : public Node {
 	void _show_messages();
 	void _vp_resized();
 
+	void _rebuild_import_menu();
+
 	void _save_scene(String p_file);
 
 
@@ -389,10 +404,17 @@ class EditorNode : public Node {
 
 	static EditorNode *singleton;
 
+	static Vector<EditorNodeInitCallback> _init_callbacks;
+
+	bool _find_scene_in_use(Node* p_node,const String& p_path) const;
+
+
 protected:
 	void _notification(int p_what);
 	static void _bind_methods();		
 public:
+
+	static EditorNode* get_singleton() { return singleton; }
 
 
 	EditorPlugin *get_editor_plugin_screen() { return editor_plugin_screen; }
@@ -402,13 +424,17 @@ public:
 	static void add_editor_plugin(EditorPlugin *p_editor);
 	static void remove_editor_plugin(EditorPlugin *p_editor);
 
+	void add_editor_import_plugin(const Ref<EditorImportPlugin>& p_editor_import);
+	void remove_editor_import_plugin(const Ref<EditorImportPlugin>& p_editor_import);
+
+
 	void edit_node(Node *p_node);
 	void edit_resource(const Ref<Resource>& p_resource);
 	void open_resource(const String& p_type="");
 	void save_resource(const Ref<Resource>& p_resource);
 	void save_resource_as(const Ref<Resource>& p_resource);
 
-
+	static bool has_unsaved_changes() { return singleton->unsaved_cache; }
 
 	static HBoxContainer *get_menu_hb() { return singleton->menu_hb; }
 
@@ -456,10 +482,16 @@ public:
 
 	void stop_child_process();
 
+	Ref<Theme> get_editor_theme() const { return theme; }
+
+
+	void show_warning(const String& p_text);
+
+
 	Error export_platform(const String& p_platform, const String& p_path, bool p_debug,const String& p_password,bool p_quit_after=false);
 
-
 	static void register_editor_types();
+	static void unregister_editor_types();
 
 	Control *get_gui_base() { return gui_base; }
 
@@ -473,10 +505,16 @@ public:
 	static void progress_task_step_bg(const String& p_task,int p_step=-1);
 	static void progress_end_task_bg(const String& p_task);
 
+	void save_scene(String p_file) { _save_scene(p_file); }
+
+	bool is_scene_in_use(const String& p_path);
+
 	void scan_import_changes();
 	EditorNode();	
 	~EditorNode();
 	void get_singleton(const char* arg1, bool arg2);
+
+	static void add_init_callback(EditorNodeInitCallback p_callback) { _init_callbacks.push_back(p_callback); }
 
 };
 

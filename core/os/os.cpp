@@ -92,6 +92,14 @@ int OS::get_iterations_per_second() const {
 	return ips;
 }
 
+void OS::set_target_fps(int p_fps) {
+	_target_fps=p_fps>0? p_fps : 0;
+}
+
+float OS::get_target_fps() const {
+	return _target_fps;
+}
+
 void OS::set_low_processor_usage_mode(bool p_enabled) {
 
 	low_processor_usage_mode=p_enabled;
@@ -115,6 +123,11 @@ String OS::get_executable_path() const {
 
 	return _execpath;
 }
+
+int OS::get_process_ID() const {
+
+	return -1;
+};
 
 uint64_t OS::get_frames_drawn() {
 
@@ -212,7 +225,7 @@ void OS::print_all_resources(String p_to_file) {
 void OS::print_resources_in_use(bool p_short) {
 
 
-	//ResourceCache::dump(NULL,p_short);
+	ResourceCache::dump(NULL,p_short);
 }
 
 void OS::dump_resources_to_file(const char* p_file) {
@@ -265,6 +278,12 @@ String OS::get_locale() const {
 String OS::get_resource_dir() const {
 
 	return Globals::get_singleton()->get_resource_path();
+}
+
+
+String OS::get_system_dir(SystemDir p_dir) const {
+
+	return ".";
 }
 
 String OS::get_data_dir() const {
@@ -373,7 +392,7 @@ void OS::_ensure_data_dir() {
 	}
 
 	da = DirAccess::create(DirAccess::ACCESS_FILESYSTEM);
-	Error err = da->make_dir(dd);
+	Error err = da->make_dir_recursive(dd);
 	if (err!=OK) {
 		ERR_EXPLAIN("Error attempting to create data dir: "+dd);
 	}
@@ -425,14 +444,55 @@ int OS::get_processor_count() const {
 	return 1;
 }
 
+Error OS::native_video_play(String p_path, float p_volume, String p_audio_track, String p_subtitle_track) {
+
+	return FAILED;
+};
+
+bool OS::native_video_is_playing() const {
+
+	return false;
+};
+
+void OS::native_video_pause() {
+
+};
+
+void OS::native_video_stop() {
+
+};
+
 void OS::set_mouse_mode(MouseMode p_mode) {
 
+}
 
+bool OS::can_use_threads() const {
+
+#ifdef NO_THREADS
+	return false;
+#else
+	return true;
+#endif
 }
 
 OS::MouseMode OS::get_mouse_mode() const{
 
 	return MOUSE_MODE_VISIBLE;
+}
+
+void OS::set_time_scale(float p_scale) {
+
+	_time_scale=p_scale;
+}
+
+OS::LatinKeyboardVariant OS::get_latin_keyboard_variant() const {
+
+	return LATIN_KEYBOARD_QWERTY;
+}
+
+float OS::get_time_scale() const {
+
+	return _time_scale;
 }
 
 
@@ -448,7 +508,9 @@ OS::OS() {
 	_exit_code=0;
 	_orientation=SCREEN_LANDSCAPE;
 	_fps=1;
+	_target_fps=0;
 	_render_thread_mode=RENDER_THREAD_SAFE;
+	_time_scale=1.0;
 	Math::seed(1234567);
 }
 

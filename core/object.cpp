@@ -33,6 +33,30 @@
 #include "message_queue.h"
 #include "core_string_names.h"
 #include "translation.h"
+
+#ifdef DEBUG_ENABLED
+
+struct _ObjectDebugLock {
+
+	Object *obj;
+
+	_ObjectDebugLock(Object *p_obj) {
+		obj=p_obj;
+		obj->_lock_index.ref();
+	}
+	~_ObjectDebugLock() {
+		obj->_lock_index.unref();
+	}
+};
+
+#define OBJ_DEBUG_LOCK _ObjectDebugLock _debug_lock(this);
+
+#else
+
+#define OBJ_DEBUG_LOCK
+
+#endif
+
 Array convert_property_list(const List<PropertyInfo> * p_list) {
 
 	Array va;
@@ -562,13 +586,22 @@ void Object::call_multilevel(const StringName& p_method,const Variant** p_args,i
 			ERR_FAIL();
 			return;
 		}
+
+
+		if (_lock_index.get()>1) {
+			ERR_EXPLAIN("Object is locked and can't be freed.");
+			ERR_FAIL();
+			return;
+		}
 #endif
+
 		//must be here, must be before everything,
 		memdelete(this);
 		return;
 	}
 
 	//Variant ret;
+	OBJ_DEBUG_LOCK
 
 	Variant::CallError error;
 
@@ -594,6 +627,7 @@ void Object::call_multilevel_reversed(const StringName& p_method,const Variant**
 	MethodBind *method=ObjectTypeDB::get_method(get_type_name(),p_method);
 
 	Variant::CallError error;
+	OBJ_DEBUG_LOCK
 
 	if (method) {
 
@@ -813,6 +847,15 @@ Variant Object::call(const StringName& p_method,const Variant** p_args,int p_arg
 			ERR_EXPLAIN("Can't 'free' a reference.");
 			ERR_FAIL_V(Variant());
 		}
+
+		if (_lock_index.get()>1) {
+			r_error.argument=0;
+			r_error.error=Variant::CallError::CALL_ERROR_INVALID_METHOD;
+			ERR_EXPLAIN("Object is locked and can't be freed.");
+			ERR_FAIL_V(Variant());
+
+		}
+
 #endif
 		//must be here, must be before everything,
 		memdelete(this);
@@ -821,7 +864,7 @@ Variant Object::call(const StringName& p_method,const Variant** p_args,int p_arg
 	}
 
 	Variant ret;
-
+	OBJ_DEBUG_LOCK
 	if (script_instance) {
 		ret = script_instance->call(p_method,p_args,p_argcount,r_error);
 		//force jumptable
@@ -902,7 +945,7 @@ void Object::set_script(const RefPtr& p_script) {
 	Ref<Script> s(script);
 
 	if (!s.is_null() && s->can_instance() ) {
-		
+		OBJ_DEBUG_LOCK
 		script_instance = s->instance_create(this);
 
 	}
@@ -990,6 +1033,13 @@ void Object::add_user_signal(const MethodInfo& p_signal) {
 	signal_map[p_signal.name]=s;
 }
 
+bool Object::_has_user_signal(const StringName& p_name) const {
+
+	if (!signal_map.has(p_name))
+		return false;
+	return signal_map[p_name].user.name.length()>0;
+}
+
 struct _ObjectSignalDisconnectData {
 
 	StringName signal;
@@ -1065,6 +1115,8 @@ void Object::emit_signal(const StringName& p_name,VARIANT_ARG_DECLARE) {
 	VMap<Signal::Target,Signal::Slot> slot_map = s->slot_map;
 
 	int ssize = slot_map.size();
+
+	OBJ_DEBUG_LOCK
 
 	for(int i=0;i<ssize;i++) {
 
@@ -1241,16 +1293,16 @@ void Object::get_signal_connection_list(const StringName& p_signal,List<Connecti
 }
 
 
-void Object::connect(const StringName& p_signal, Object *p_to_object, const StringName& p_to_method,const Vector<Variant>& p_binds,uint32_t p_flags) {
+Error Object::connect(const StringName& p_signal, Object *p_to_object, const StringName& p_to_method,const Vector<Variant>& p_binds,uint32_t p_flags) {
 
-	ERR_FAIL_NULL(p_to_object);
+	ERR_FAIL_NULL_V(p_to_object,ERR_INVALID_PARAMETER);
 
 	Signal *s = signal_map.getptr(p_signal);
 	if (!s) {
 		bool signal_is_valid = ObjectTypeDB::has_signal(get_type_name(),p_signal);
 		if (!signal_is_valid) {
 			ERR_EXPLAIN("Attempt to connect to unexisting signal: "+p_signal);
-			ERR_FAIL_COND(!signal_is_valid);
+			ERR_FAIL_COND_V(!signal_is_valid,ERR_INVALID_PARAMETER);
 		}
 		signal_map[p_signal]=Signal();
 		s=&signal_map[p_signal];
@@ -1259,7 +1311,7 @@ void Object::connect(const StringName& p_signal, Object *p_to_object, const Stri
 	Signal::Target target(p_to_object->get_instance_ID(),p_to_method);
 	if (s->slot_map.has(target)) {
 		ERR_EXPLAIN("Signal '"+p_signal+"'' already connected to given method '"+p_to_method+"' in that object.");
-		ERR_FAIL_COND(s->slot_map.has(target));
+		ERR_FAIL_COND_V(s->slot_map.has(target),ERR_INVALID_PARAMETER);
 	}
 
 	Signal::Slot slot;
@@ -1274,6 +1326,8 @@ void Object::connect(const StringName& p_signal, Object *p_to_object, const Stri
 	slot.conn=conn;
 	slot.cE=p_to_object->connections.push_back(conn);
 	s->slot_map[target]=slot;
+
+	return OK;
 }
 
 bool Object::is_connected(const StringName& p_signal, Object *p_to_object, const StringName& p_to_method) const {
@@ -1384,6 +1438,7 @@ void Object::_bind_methods() {
 //	ObjectTypeDB::bind_method(_MD("call_deferred","method","arg1","arg2","arg3","arg4"),&Object::_call_deferred_bind,DEFVAL(Variant()),DEFVAL(Variant()),DEFVAL(Variant()),DEFVAL(Variant()));
 
 	ObjectTypeDB::bind_method(_MD("add_user_signal","signal","arguments"),&Object::_add_user_signal,DEFVAL(Array()));
+	ObjectTypeDB::bind_method(_MD("has_user_signal","signal"),&Object::_has_user_signal);
 //	ObjectTypeDB::bind_method(_MD("emit_signal","signal","arguments"),&Object::_emit_signal,DEFVAL(Array()));
 
 
@@ -1442,7 +1497,7 @@ void Object::_bind_methods() {
 	ObjectTypeDB::bind_method(_MD("set_block_signals","enable"),&Object::set_block_signals);
 	ObjectTypeDB::bind_method(_MD("is_blocking_signals"),&Object::is_blocking_signals);
 	ObjectTypeDB::bind_method(_MD("set_message_translation","enable"),&Object::set_message_translation);
-	ObjectTypeDB::bind_method(_MD("can_translate_messages"),&Object::set_message_translation);
+	ObjectTypeDB::bind_method(_MD("can_translate_messages"),&Object::can_translate_messages);
 	ObjectTypeDB::bind_method(_MD("property_list_changed_notify"),&Object::property_list_changed_notify);
 
 	ObjectTypeDB::bind_method(_MD("XL_MESSAGE","message"),&Object::XL_MESSAGE);
@@ -1458,10 +1513,12 @@ void Object::_bind_methods() {
 	BIND_VMETHOD( miget );
 
 	MethodInfo plget("_get_property_list");
+
 	plget.return_val.type=Variant::ARRAY;
 	BIND_VMETHOD( plget );
 
 #endif
+	BIND_VMETHOD( MethodInfo("_init") );
 
 
 
@@ -1535,6 +1592,11 @@ Object::Object() {
 
 	_edited=false;
 #endif
+
+#ifdef DEBUG_ENABLED
+	_lock_index.init(1);
+#endif
+
 
 
 }
@@ -1639,6 +1701,11 @@ void ObjectDB::debug_objects(DebugFunc p_func) {
 	}
 }
 
+
+void Object::get_argument_options(const StringName& p_function,int p_idx,List<String>*r_options) const {
+
+
+}
 
 int ObjectDB::get_object_count() {
 

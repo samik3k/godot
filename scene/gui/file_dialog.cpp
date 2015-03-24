@@ -29,6 +29,8 @@
 #include "file_dialog.h"
 #include "scene/gui/label.h"
 #include "print_string.h"
+#include "os/keyboard.h"
+
 
 
 FileDialog::GetIconFunc FileDialog::get_icon_func=NULL;
@@ -156,11 +158,68 @@ void FileDialog::_action_pressed() {
 
 	if (mode==MODE_SAVE_FILE) {
 		
+		bool valid=false;
+
+		if (filter->get_selected()==filter->get_item_count()-1) {
+			valid=true; //match none
+		} else if (filters.size()>1 && filter->get_selected()==0) {
+			// match all filters
+			for (int i=0;i<filters.size();i++) {
+
+				String flt=filters[i].get_slice(";",0);
+				for (int j=0;j<flt.get_slice_count(",");j++) {
+
+					String str = flt.get_slice(",",j).strip_edges();
+					if (f.match(str)) {
+						valid=true;
+						break;
+					}
+				}
+				if (valid)
+					break;
+			}
+		} else {
+			int idx=filter->get_selected();
+			if (filters.size()>1)
+				idx--;
+			if (idx>=0 && idx<filters.size()) {
+
+				String flt=filters[idx].get_slice(";",0);
+				int filterSliceCount=flt.get_slice_count(",");
+				for (int j=0;j<filterSliceCount;j++) {
+
+					String str = (flt.get_slice(",",j).strip_edges());
+					if (f.match(str)) {
+						valid=true;
+						break;
+					}
+				}
+
+				if (!valid && filterSliceCount>0) {
+					String str = (flt.get_slice(",",0).strip_edges());
+					f+=str.substr(1, str.length()-1);
+					file->set_text(f.get_file());
+					valid=true;
+				}
+			} else {
+				valid=true;
+			}
+		}
+
+
+		if (!valid) {
+
+			exterr->popup_centered_minsize(Size2(250,80));
+			return;
+
+		}
+
 		if (dir_access->file_exists(f)) {
 			confirm_save->set_text("File Exists, Overwrite?");
 			confirm_save->popup_centered(Size2(200,80));
 		} else {
 			
+
 			emit_signal("file_selected",f);
 			hide();
 		}
@@ -221,13 +280,20 @@ void FileDialog::update_file_list() {
 	List<String> dirs;
 	
 	bool isdir;
+	bool ishidden;
+	bool show_hidden = show_hidden_files;
 	String item;
+
 	while ((item=dir_access->get_next(&isdir))!="") {
-		
-		if (!isdir)
-			files.push_back(item);
-		else
-			dirs.push_back(item);		
+
+		ishidden = dir_access->current_is_hidden();
+
+		if (show_hidden || !ishidden) {
+			if (!isdir)
+				files.push_back(item);
+			else
+				dirs.push_back(item);
+		}
 	}
 	
 	dirs.sort_custom<NoCaseComparator>();
@@ -519,6 +585,8 @@ void FileDialog::_make_dir_confirm() {
 void FileDialog::_make_dir() {
 
 	makedialog->popup_centered_minsize(Size2(250,80));
+	makedirname->grab_focus();
+
 }
 
 void FileDialog::_select_drive(int p_idx) {
@@ -557,6 +625,9 @@ void FileDialog::_update_drives() {
 	}
 }
 
+bool FileDialog::default_show_hidden_files=true;
+
+
 void FileDialog::_bind_methods() {
 	
 	ObjectTypeDB::bind_method(_MD("_tree_selected"),&FileDialog::_tree_selected);
@@ -581,6 +652,8 @@ void FileDialog::_bind_methods() {
 	ObjectTypeDB::bind_method(_MD("get_vbox:VBoxContainer"),&FileDialog::get_vbox);
 	ObjectTypeDB::bind_method(_MD("set_access","access"),&FileDialog::set_access);
 	ObjectTypeDB::bind_method(_MD("get_access"),&FileDialog::get_access);
+	ObjectTypeDB::bind_method(_MD("set_show_hidden_files"),&FileDialog::set_show_hidden_files);
+	ObjectTypeDB::bind_method(_MD("is_showing_hidden_files"),&FileDialog::is_showing_hidden_files);
 	ObjectTypeDB::bind_method(_MD("_select_drive"),&FileDialog::_select_drive);
 	ObjectTypeDB::bind_method(_MD("_make_dir"),&FileDialog::_make_dir);
 	ObjectTypeDB::bind_method(_MD("_make_dir_confirm"),&FileDialog::_make_dir_confirm);
@@ -605,9 +678,23 @@ void FileDialog::_bind_methods() {
 }
 
 
+void FileDialog::set_show_hidden_files(bool p_show) {
+	show_hidden_files=p_show;
+	invalidate();
+}
+
+bool FileDialog::is_showing_hidden_files() const {
+	return show_hidden_files;
+}
+
+void FileDialog::set_default_show_hidden_files(bool p_show) {
+	default_show_hidden_files=p_show;
+}
 
 FileDialog::FileDialog() {
-	
+
+	show_hidden_files=true;
+
 	VBoxContainer *vbc = memnew( VBoxContainer );
 	add_child(vbc);
 	set_child_rect(vbc);
@@ -679,6 +766,10 @@ FileDialog::FileDialog() {
 	mkdirerr = memnew( AcceptDialog );
 	mkdirerr->set_text("Could not create folder.");
 	add_child(mkdirerr);
+
+	exterr = memnew( AcceptDialog );
+	exterr->set_text("Must use a valid extension.");
+	add_child(exterr);
 
 
 	//update_file_list();

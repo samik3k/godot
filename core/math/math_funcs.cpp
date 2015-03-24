@@ -75,7 +75,8 @@ void Math::seed(uint32_t x) {
 
 void Math::randomize() {
 
-	seed(OS::get_singleton()->get_ticks_usec()); /* *OS::get_singleton()->get_time().sec); // windows doesn't have get_time(), returns always 0 */
+	OS::Time time = OS::get_singleton()->get_time();
+	seed(OS::get_singleton()->get_ticks_usec()*(time.hour+1)*(time.min+1)*(time.sec+1)*rand()); /* *OS::get_singleton()->get_time().sec); // windows doesn't have get_time(), returns always 0 */
 }
 
 uint32_t Math::rand() {
@@ -219,9 +220,16 @@ int Math::decimals(double p_step) {
 
 double Math::ease(double p_x, double p_c) {
 
+	if (p_x<0)
+		p_x=0;
+	else if (p_x>1.0)
+		p_x=1.0;
 	if (p_c>0) {
-
-		return Math::pow(p_x,p_c);
+		if (p_c<1.0) {
+			return 1.0-Math::pow(1.0-p_x,1.0/p_c);
+		} else {
+			return Math::pow(p_x,p_c);
+		}
 	} else  if (p_c<0) {
 		//inout ease
 

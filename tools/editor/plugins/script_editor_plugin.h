@@ -79,12 +79,13 @@ class ScriptTextEditor : public CodeTextEditor {
 
 	Vector<String> functions;
 
+
 protected:
 
 
 
 	virtual void _validate_script();
-	virtual void _code_complete_script(const String& p_code,const String& p_keyword, int p_line, List<String>* r_options);
+	virtual void _code_complete_script(const String& p_code, List<String>* r_options);
 	virtual void _load_theme_settings();
 	void _notification(int p_what);
 
@@ -121,6 +122,13 @@ class ScriptEditor : public VBoxContainer {
 		EDIT_PASTE,
 		EDIT_SELECT_ALL,
 		EDIT_COMPLETE,
+		EDIT_AUTO_INDENT,
+        EDIT_TOGGLE_COMMENT,
+        EDIT_MOVE_LINE_UP,
+        EDIT_MOVE_LINE_DOWN,
+        EDIT_INDENT_RIGHT,
+        EDIT_INDENT_LEFT,
+        EDIT_CLONE_DOWN,
 		SEARCH_FIND,
 		SEARCH_FIND_NEXT,
 		SEARCH_REPLACE,
@@ -132,6 +140,7 @@ class ScriptEditor : public VBoxContainer {
 		DEBUG_BREAK,
 		DEBUG_CONTINUE,
 		DEBUG_SHOW,
+		HELP_CONTEXTUAL,
 		WINDOW_CLOSE,
 		WINDOW_MOVE_LEFT,
 		WINDOW_MOVE_RIGHT,
@@ -144,6 +153,7 @@ class ScriptEditor : public VBoxContainer {
 	MenuButton *search_menu;
 	MenuButton *window_menu;
 	MenuButton *debug_menu;
+	MenuButton *help_menu;
 	uint64_t idle;
 
 	TabContainer *tab_container;
@@ -184,6 +194,7 @@ class ScriptEditor : public VBoxContainer {
 	void _breaked(bool p_breaked,bool p_can_debug);
 	void _show_debugger(bool p_show);
 	void _update_window_menu();
+
 	static ScriptEditor *script_editor;
 protected:
 	void _notification(int p_what);
@@ -207,7 +218,7 @@ public:
 
 	void get_breakpoints(List<String> *p_breakpoints);
 
-
+    void swap_lines(TextEdit *tx, int line1, int line2);
 
 	void save_external_data();
 

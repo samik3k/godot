@@ -33,14 +33,13 @@
 #include "editor_fonts.h"
 
 #include "editor_help.h"
-#include "scene/io/scene_saver.h"
-#include "scene/io/scene_loader.h"
 #include "core/io/resource_saver.h"
 #include "core/io/resource_loader.h"
 #include "servers/physics_2d_server.h"
 #include "scene/resources/packed_scene.h"
 #include "editor_settings.h"
 #include "io_plugins/editor_import_collada.h"
+#include "io_plugins/editor_scene_importer_fbxconv.h"
 #include "globals.h"
 #include <stdio.h>
 #include "object_type_db.h"
@@ -70,40 +69,49 @@
 #include "plugins/item_list_editor_plugin.h"
 #include "plugins/stream_editor_plugin.h"
 #include "plugins/multimesh_editor_plugin.h"
+#include "plugins/mesh_editor_plugin.h"
 #include "plugins/theme_editor_plugin.h"
 
 #include "plugins/tile_map_editor_plugin.h"
 #include "plugins/cube_grid_theme_editor_plugin.h"
 #include "plugins/shader_editor_plugin.h"
+#include "plugins/shader_graph_editor_plugin.h"
 #include "plugins/path_editor_plugin.h"
 #include "plugins/rich_text_editor_plugin.h"
 #include "plugins/collision_polygon_editor_plugin.h"
+#include "plugins/collision_polygon_2d_editor_plugin.h"
 #include "plugins/script_editor_plugin.h"
 #include "plugins/path_2d_editor_plugin.h"
 #include "plugins/particles_editor_plugin.h"
 #include "plugins/particles_2d_editor_plugin.h"
-#include "plugins/font_editor_plugin.h"
-#include "plugins/animation_editor_plugin.h"
 #include "plugins/animation_tree_editor_plugin.h"
 #include "plugins/tile_set_editor_plugin.h"
 #include "plugins/animation_player_editor_plugin.h"
+#include "plugins/baked_light_editor_plugin.h"
+#include "plugins/polygon_2d_editor_plugin.h"
+#include "plugins/navigation_polygon_editor_plugin.h"
+#include "plugins/light_occluder_2d_editor_plugin.h"
 // end
 #include "tools/editor/io_plugins/editor_texture_import_plugin.h"
 #include "tools/editor/io_plugins/editor_scene_import_plugin.h"
 #include "tools/editor/io_plugins/editor_font_import_plugin.h"
 #include "tools/editor/io_plugins/editor_sample_import_plugin.h"
 #include "tools/editor/io_plugins/editor_translation_import_plugin.h"
+#include "tools/editor/io_plugins/editor_mesh_import_plugin.h"
+
+
 
 EditorNode *EditorNode::singleton=NULL;
 
 void EditorNode::_update_title() {
 
+	String appname = Globals::get_singleton()->get("application/name");
+	String title = appname.empty()?String(VERSION_FULL_NAME):String(_MKSTR(VERSION_NAME) + String(" - ") + appname);
 	String edited = edited_scene?edited_scene->get_filename():String();
-
-	String title = edited.empty()?String(VERSION_FULL_NAME):String(_MKSTR(VERSION_NAME) + String(" - ")+edited.get_file());
+	if (!edited.empty())
+		title+=" - " + String(edited.get_file());
 	if (unsaved_cache)
 		title+=" (*)";
-
 
 	OS::get_singleton()->set_window_title(title);
 
@@ -115,7 +123,10 @@ void EditorNode::_unhandled_input(const InputEvent& p_event) {
 
 		switch(p_event.key.scancode) {
 
-			case KEY_F1: _editor_select(3); break;
+			case KEY_F1:
+				if (!p_event.key.mod.shift && !p_event.key.mod.command)
+					_editor_select(3);
+			break;
 			case KEY_F2: _editor_select(0); break;
 			case KEY_F3: _editor_select(1); break;
 			case KEY_F4: _editor_select(2); break;
@@ -132,7 +143,7 @@ void EditorNode::_unhandled_input(const InputEvent& p_event) {
 
 void EditorNode::_notification(int p_what) {
 
-	if (p_what==NOTIFICATION_EXIT_SCENE) {
+	if (p_what==NOTIFICATION_EXIT_TREE) {
 		editor_data.save_editor_external_data();
 
 		log->deinit(); // do not get messages anymore
@@ -205,13 +216,14 @@ void EditorNode::_notification(int p_what) {
 		}
 	
 	}
-	if (p_what==NOTIFICATION_ENTER_SCENE) {
+	if (p_what==NOTIFICATION_ENTER_TREE) {
+
 
 		//MessageQueue::get_singleton()->push_call(this,"_get_scene_metadata");
-		get_scene()->set_editor_hint(true);				
-		get_scene()->get_root()->set_as_audio_listener(false);
-		get_scene()->get_root()->set_as_audio_listener_2d(false);
-		get_scene()->set_auto_accept_quit(false);
+		get_tree()->set_editor_hint(true);				
+		get_tree()->get_root()->set_as_audio_listener(false);
+		get_tree()->get_root()->set_as_audio_listener_2d(false);
+		get_tree()->set_auto_accept_quit(false);
 				//VisualServer::get_singleton()->viewport_set_hide_canvas(editor->get_scene_root()->get_viewport(),false);
 
 		//import_monitor->scan_changes();
@@ -220,29 +232,12 @@ void EditorNode::_notification(int p_what) {
 
 		VisualServer::get_singleton()->viewport_set_hide_scenario(get_scene_root()->get_viewport(),true);
 		VisualServer::get_singleton()->viewport_set_hide_canvas(get_scene_root()->get_viewport(),true);
+		VisualServer::get_singleton()->viewport_set_disable_environment(get_viewport()->get_viewport_rid(),true);
+
 		_editor_select(1);
 
 		if (defer_load_scene!="") {
 
-#ifdef OLD_SCENE_FORMAT_ENABLED
-
-			if (convert_old) {
-				get_scene()->quit();
-				Node *scn = SceneLoader::load(defer_load_scene,true);
-				ERR_EXPLAIN("Couldn't load scene: "+defer_load_scene);
-				ERR_FAIL_COND(!scn);
-				Ref<PackedScene> sdata = memnew( PackedScene );
-				Error err = sdata->pack(scn);
-				ERR_EXPLAIN("Couldn't repack scene: "+defer_load_scene);
-				ERR_FAIL_COND(err!=OK);
-				err = ResourceSaver::save(defer_load_scene,sdata);
-				ERR_EXPLAIN("Couldn't resave scene: "+defer_load_scene);
-				ERR_FAIL_COND(err!=OK);
-
-				return;
-			}
-
-#endif
 			load_scene(defer_load_scene);
 			defer_load_scene="";
 		}
@@ -253,7 +248,7 @@ void EditorNode::_notification(int p_what) {
 			if (ok!=OK)
 				OS::get_singleton()->set_exit_code(255);
 			defer_translatable="";
-			get_scene()->quit();
+			get_tree()->quit();
 		}
 
 /*
@@ -302,6 +297,10 @@ void EditorNode::_notification(int p_what) {
 		}
 */
 
+		if (bool(EDITOR_DEF("resources/auto_reload_modified_images",true))) {
+
+			_menu_option_confirm(DEPENDENCY_LOAD_CHANGED_IMAGES,true);
+		}
 
 		EditorFileSystem::get_singleton()->scan_sources();
 
@@ -340,6 +339,19 @@ void EditorNode::_sources_changed(bool p_exist) {
 void EditorNode::_vp_resized() {
 
 
+}
+
+void EditorNode::_rebuild_import_menu()
+{
+	PopupMenu* p = import_menu->get_popup();
+	p->clear();
+	p->add_item("Sub-Scene", FILE_IMPORT_SUBSCENE);
+	p->add_separator();
+	for (int i = 0; i < editor_import_export->get_import_plugin_count(); i++) {
+		p->add_item(editor_import_export->get_import_plugin(i)->get_visible_name(), IMPORT_PLUGIN_BASE + i);
+	}
+	p->add_separator();
+	p->add_item("Re-Import..", SETTINGS_IMPORT);
 }
 
 void EditorNode::_node_renamed() {
@@ -724,8 +736,7 @@ void EditorNode::_save_scene(String p_file) {
 		flg|=ResourceSaver::FLAG_COMPRESS;
 	if (EditorSettings::get_singleton()->get("on_save/save_paths_as_relative"))
 		flg|=ResourceSaver::FLAG_RELATIVE_PATHS;
-	if (EditorSettings::get_singleton()->get("on_save/save_paths_without_extension"))
-		flg|=ResourceSaver::FLAG_NO_EXTENSION;
+	flg|=ResourceSaver::FLAG_REPLACE_SUBRESOURCE_PATHS;
 
 
 	err = ResourceSaver::save(p_file,sdata,flg);
@@ -874,72 +885,33 @@ void EditorNode::_dialog_action(String p_file) {
 
 			load_scene(p_file);
 		} break;
-#ifdef OLD_SCENE_FORMAT_ENABLED
-		case FILE_OPEN_OLD_SCENE: {
-
-			String lpath = Globals::get_singleton()->localize_path(p_file);
-			if (!lpath.begins_with("res://")) {
-
-				current_option=-1;
-				//accept->get_cancel()->hide();
-				accept->get_ok()->set_text("Ugh");
-				accept->set_text("Error loading scene, it must be inside the project path. Use 'Import' to open the scene, then save it inside the project path.");
-				accept->popup_centered(Size2(300,120));
-				return ;
-			}
-
-			Node*new_scene=SceneLoader::load(lpath,true);
-
-			if (!new_scene) {
-
-				current_option=-1;
-				//accept->get_cancel()->hide();
-				accept->get_ok()->set_text("Ugh");
-				accept->set_text("Error loading scene.");
-				accept->popup_centered(Size2(300,70));;
-				return ;
-			}
-
-			Node *old_scene = edited_scene;
-			_hide_top_editors();
-			set_edited_scene(NULL);
-			editor_data.clear_editor_states();
-			if (old_scene) {
-				memdelete(old_scene);
-			}
-
-			set_edited_scene(new_scene);
-			scene_tree_dock->set_selected(new_scene);
-			_get_scene_metadata();
-
-			editor_data.get_undo_redo().clear_history();
-			saved_version=editor_data.get_undo_redo().get_version();
-			_update_title();
-
-			_add_to_recent_scenes(lpath);
-
-			if (new_scene->has_meta("__editor_plugin_screen__")) {
-
-				String editor = new_scene->get_meta("__editor_plugin_screen__");
-				for(int i=0;i<editor_table.size();i++) {
-
-					if (editor_table[i]->get_name()==editor) {
-						_editor_select(i);
-						break;
-					}
-				}
-			}
-
-
-		} break;
-#endif
 
 		case FILE_SAVE_OPTIMIZED: {
 
 
 
 		} break;
+		case FILE_RUN_SCRIPT: {
 
+			print_line("RUN: "+p_file);
+			Ref<Script> scr = ResourceLoader::load(p_file,"Script",true);
+			if (scr.is_null()) {
+				add_io_error("Script Failed to Load:\n"+p_file);
+				return;
+			}
+			if (!scr->is_tool()) {
+
+				add_io_error("Script is not tool, will not be able to run:\n"+p_file);
+				return;
+			}
+
+			Ref<EditorScript> es = memnew( EditorScript );
+			es->set_script(scr.get_ref_ptr());
+			es->set_editor(this);
+			es->_run();
+
+			get_undo_redo()->clear_history();
+		} break;
 		case FILE_DUMP_STRINGS: {
 
 			save_translatable_strings(p_file);
@@ -986,8 +958,6 @@ void EditorNode::_dialog_action(String p_file) {
 					flg|=ResourceSaver::FLAG_COMPRESS;
 				if (EditorSettings::get_singleton()->get("on_save/save_paths_as_relative"))
 					flg|=ResourceSaver::FLAG_RELATIVE_PATHS;
-				if (EditorSettings::get_singleton()->get("on_save/save_paths_without_extension"))
-					flg|=ResourceSaver::FLAG_NO_EXTENSION;
 
 
 				err = ResourceSaver::save(p_file,sdata,flg);
@@ -1026,6 +996,15 @@ void EditorNode::_dialog_action(String p_file) {
 			}
 
 		} break;
+
+		case FILE_SAVE_AND_RUN: {
+			if (file->get_mode()==FileDialog::MODE_SAVE_FILE) {
+
+				_save_scene(p_file);
+				_run(false);
+			}
+		} break;
+
 		case FILE_EXPORT_MESH_LIBRARY: {
 
 			Ref<MeshLibrary> ml;
@@ -1111,10 +1090,20 @@ void EditorNode::_dialog_action(String p_file) {
 			}
 			int ret = unzGoToFirstFile(pkg);
 
+			int fc=0; //coun them
 
-			EditorProgress p("ltask","Loading Export Templates",1);
+			while(ret==UNZ_OK) {
+				fc++;
+				ret = unzGoToNextFile(pkg);
+
+			}
+
+			ret = unzGoToFirstFile(pkg);
+
+			EditorProgress p("ltask","Loading Export Templates",fc);
 			print_line("BEGIN IMPORT");
 
+			fc=0;
 
 			while(ret==UNZ_OK) {
 
@@ -1123,19 +1112,25 @@ void EditorNode::_dialog_action(String p_file) {
 				char fname[16384];
 				ret = unzGetCurrentFileInfo(pkg,&info,fname,16384,NULL,0,NULL,0);
 
+
 				String file=fname;
 
 				Vector<uint8_t> data;
 				data.resize(info.uncompressed_size);
 
 				//read
-				unzOpenCurrentFile(pkg);
-				unzReadCurrentFile(pkg,data.ptr(),data.size());
+				ret = unzOpenCurrentFile(pkg);
+				ret = unzReadCurrentFile(pkg,data.ptr(),data.size());
 				unzCloseCurrentFile(pkg);
+
+				print_line(fname);
+				//for(int i=0;i<512;i++) {
+				//	print_line(itos(data[i]));
+				//}
 
 				file=file.get_file();
 
-				p.step("Importing: "+file,0);
+				p.step("Importing: "+file,fc);
 				print_line("IMPORT "+file);
 
 				FileAccess *f = FileAccess::open(EditorSettings::get_singleton()->get_settings_path()+"/templates/"+file,FileAccess::WRITE);
@@ -1146,6 +1141,7 @@ void EditorNode::_dialog_action(String p_file) {
 				memdelete(f);
 
 				ret = unzGoToNextFile(pkg);
+				fc++;
 			}
 
 			unzClose(pkg);
@@ -1264,7 +1260,7 @@ void EditorNode::_edit_current() {
 
 		Node * current_node = current_obj->cast_to<Node>();
 		ERR_FAIL_COND(!current_node);
-		ERR_FAIL_COND(!current_node->is_inside_scene());
+		ERR_FAIL_COND(!current_node->is_inside_tree());
 
 
 
@@ -1278,6 +1274,7 @@ void EditorNode::_edit_current() {
 	}
 
 	/* Take care of PLUGIN EDITOR */
+
 
 	EditorPlugin *main_plugin = editor_data.get_editor(current_obj);
 
@@ -1340,6 +1337,8 @@ void EditorNode::_edit_current() {
 	p->clear();
 	p->add_item("Copy Params",OBJECT_COPY_PARAMS);
 	p->add_item("Set Params",OBJECT_PASTE_PARAMS);
+	p->add_separator();
+	p->add_item("Make Resources Unique",OBJECT_UNIQUE_RESOURCES);
 	p->add_separator();
 	p->add_icon_item(gui_base->get_icon("Help","EditorIcons"),"Class Reference",OBJECT_REQUEST_HELP);
 	List<MethodInfo> methods;
@@ -1419,13 +1418,10 @@ void EditorNode::_run(bool p_current,const String& p_custom) {
 		}
 
 		if (scene->get_filename()=="") {
-
-
 			current_option=-1;
 			//accept->get_cancel()->hide();
-			accept->get_ok()->set_text("I see..");
-			accept->set_text("Scene has never been saved. Save before running!");
-			accept->popup_centered(Size2(300,70));;
+			/**/
+			_menu_option_confirm(FILE_SAVE_BEFORE_RUN, false);
 			return;
 
 		}
@@ -1459,7 +1455,7 @@ void EditorNode::_run(bool p_current,const String& p_custom) {
 			current_option=-1;
 			//accept->get_cancel()->hide();
 			accept->get_ok()->set_text("I see..");
-			accept->set_text("No main scene has ever been defined.\nSelect one from \"Project Settings\" under the 'run' category.");
+			accept->set_text("No main scene has ever been defined.\nSelect one from \"Project Settings\" under the 'application' category.");
 			accept->popup_centered(Size2(300,100));;
 			return;
 		}
@@ -1529,8 +1525,8 @@ void EditorNode::_cleanup_scene() {
 	editor_history.clear();
 	_hide_top_editors();
 	animation_editor->cleanup();
-	resources_dock->cleanup();
 	property_editor->edit(NULL);
+	resources_dock->cleanup();
 	scene_import_metadata.unref();
 	set_edited_scene(NULL);
 	if (scene) {
@@ -1556,6 +1552,8 @@ void EditorNode::_cleanup_scene() {
 		}
 
 	}
+	
+	_update_title();
 
 }
 
@@ -1617,7 +1615,10 @@ void EditorNode::_menu_option_confirm(int p_option,bool p_confirmed) {
 			quick_open->set_title("Quick Open Script..");
 
 		} break;
+		case FILE_RUN_SCRIPT: {
 
+			file_script->popup_centered_ratio();
+		} break;
 		case FILE_OPEN_PREV: {
 
 			if (previous_scenes.empty())
@@ -1626,28 +1627,6 @@ void EditorNode::_menu_option_confirm(int p_option,bool p_confirmed) {
 			open_request(previous_scenes.back()->get());
 
 		} break;
-#ifdef OLD_SCENE_FORMAT_ENABLED
-		case FILE_OPEN_OLD_SCENE: {
-
-			//print_tree();
-			file->set_mode(FileDialog::MODE_OPEN_FILE);
-			//not for now?
-			file->clear_filters();
-			file->add_filter("*.xml");
-
-
-			//file->set_current_path(current_path);
-			Node *scene = edited_scene;
-			if (scene) {
-				file->set_current_path(scene->get_filename());
-			};
-			file->set_title("Open Scene");
-			file->popup_centered_ratio();
-
-
-		} break;
-
-#endif
 		case FILE_SAVE_SCENE: {
 
 
@@ -1709,6 +1688,18 @@ void EditorNode::_menu_option_confirm(int p_option,bool p_confirmed) {
 			
 		} break;
 
+		case FILE_SAVE_BEFORE_RUN: {
+			if (!p_confirmed) {
+				accept->get_ok()->set_text("Yes");
+				accept->set_text("This scene has never been saved. Save before running?");
+				accept->popup_centered(Size2(300, 70));
+				break;
+			}
+
+			_menu_option(FILE_SAVE_AS_SCENE);
+			_menu_option_confirm(FILE_SAVE_AND_RUN, true);
+		} break;
+
 		case FILE_DUMP_STRINGS: {
 
 			Node *scene = edited_scene;
@@ -1743,6 +1734,8 @@ void EditorNode::_menu_option_confirm(int p_option,bool p_confirmed) {
 			}
 
 			bool relpaths = (scene->has_meta("__editor_relpaths__") && scene->get_meta("__editor_relpaths__").operator bool());
+
+			file->set_mode(FileDialog::MODE_SAVE_FILE);
 
 			file->set_current_path(cpath);
 			file->set_title("Save Translatable Strings");
@@ -1944,8 +1937,9 @@ void EditorNode::_menu_option_confirm(int p_option,bool p_confirmed) {
 				confirmation->popup_centered(Size2(300,70));
 				break;
 			}
-			
-			get_scene()->quit();
+
+			_menu_option_confirm(RUN_STOP,true);
+			get_tree()->quit();
 				
 		} break;
 		case FILE_EXTERNAL_OPEN_SCENE: {
@@ -1991,6 +1985,25 @@ void EditorNode::_menu_option_confirm(int p_option,bool p_confirmed) {
 				log->add_message("REDO: "+action);
 
 		} break;
+
+		case EDIT_REVERT: {
+
+			Node *scene = get_edited_scene();
+
+			if (!scene)
+				break;
+			
+			if (unsaved_cache && !p_confirmed) {
+				confirmation->get_ok()->set_text("Revert");
+				confirmation->set_text("This action cannot be undone. Revert anyway?");
+				confirmation->popup_centered(Size2(300,70));
+				break;
+			}
+
+			Error err = load_scene(scene->get_filename());
+
+		} break;
+
 #if 0
 		case NODE_EXTERNAL_INSTANCE: {
 
@@ -2068,6 +2081,47 @@ void EditorNode::_menu_option_confirm(int p_option,bool p_confirmed) {
 				editor_data.paste_object_params(current);
 			editor_data.get_undo_redo().clear_history();
 		} break;
+		case OBJECT_UNIQUE_RESOURCES: {
+
+			editor_data.apply_changes_in_editors();;
+			if (current) {
+				List<PropertyInfo> props;
+				current->get_property_list(&props);
+				Map<RES,RES> duplicates;
+				for (List<PropertyInfo>::Element *E=props.front();E;E=E->next()) {
+
+					if (!(E->get().usage&PROPERTY_USAGE_STORAGE))
+						continue;
+
+					Variant v = current->get(E->get().name);
+					if (v.is_ref()) {
+						REF ref = v;
+						if (ref.is_valid()) {
+
+							RES res = ref;
+							if (res.is_valid()) {
+
+								if (!duplicates.has(res)) {
+									duplicates[res]=res->duplicate();
+								}
+								res=duplicates[res];
+
+								current->set(E->get().name,res);
+							}
+
+						}
+					}
+
+				}
+			}
+
+			editor_data.get_undo_redo().clear_history();
+			if (editor_plugin_screen) { //reload editor plugin
+				editor_plugin_over->edit(NULL);
+				editor_plugin_over->edit(current);
+			}
+
+		} break;
 		case OBJECT_CALL_METHOD: {
 		
 			editor_data.apply_changes_in_editors();;
@@ -2113,8 +2167,27 @@ void EditorNode::_menu_option_confirm(int p_option,bool p_confirmed) {
 		} break;
 		case RUN_SETTINGS: {
 
-
 			project_settings->popup_project_settings();
+		} break;
+		case RUN_PROJECT_MANAGER: {
+
+			if (!p_confirmed) {
+				confirmation->get_ok()->set_text("Yes");
+				confirmation->set_text("Open Project Manager? \n(Unsaved changes will be lost)");
+				confirmation->popup_centered(Size2(300,70));
+				break;
+			}
+
+			get_tree()->quit();
+			String exec = OS::get_singleton()->get_executable_path();
+
+			List<String> args;
+			args.push_back ( "-path" );
+			args.push_back (exec.get_base_dir() );
+
+			OS::ProcessID pid=0;
+			Error err = OS::get_singleton()->execute(exec,args,false,&pid);
+			ERR_FAIL_COND(err);
 		} break;
 		case RUN_FILE_SERVER: {
 
@@ -2136,8 +2209,9 @@ void EditorNode::_menu_option_confirm(int p_option,bool p_confirmed) {
 		} break;
 		case RUN_DEPLOY_DUMB_CLIENTS: {
 
-		bool ischecked = fileserver_menu->get_popup()->is_item_checked( fileserver_menu->get_popup()->get_item_index(RUN_DEPLOY_DUMB_CLIENTS));
-		fileserver_menu->get_popup()->set_item_checked( fileserver_menu->get_popup()->get_item_index(RUN_DEPLOY_DUMB_CLIENTS),!ischecked);
+			bool ischecked = fileserver_menu->get_popup()->is_item_checked( fileserver_menu->get_popup()->get_item_index(RUN_DEPLOY_DUMB_CLIENTS));
+			fileserver_menu->get_popup()->set_item_checked( fileserver_menu->get_popup()->get_item_index(RUN_DEPLOY_DUMB_CLIENTS),!ischecked);
+			run_native->set_deploy_dumb(!ischecked);
 
 		} break;
 		case SETTINGS_UPDATE_ALWAYS: {
@@ -2183,15 +2257,17 @@ void EditorNode::_menu_option_confirm(int p_option,bool p_confirmed) {
 
 			reimport_dialog->popup_reimport();
 		} break;
-		case DEPENDENCY_UPDATE_LOCAL: {
+		case DEPENDENCY_LOAD_CHANGED_IMAGES: {
 
-			/*
+
 			List<Ref<Resource> > cached;
 			ResourceCache::get_cached_resources(&cached);
 
 			for(List<Ref<Resource> >::Element *E=cached.front();E;E=E->next()) {
 
 				if (!E->get()->can_reload_from_file())
+					continue;
+				if (!FileAccess::exists(E->get()->get_path()))
 					continue;
 				uint64_t mt = FileAccess::get_modified_time(E->get()->get_path());
 				if (mt!=E->get()->get_last_modified_time()) {
@@ -2200,15 +2276,6 @@ void EditorNode::_menu_option_confirm(int p_option,bool p_confirmed) {
 			}
 
 
-			sources_button->get_popup()->set_item_disabled(sources_button->get_popup()->get_item_index(DEPENDENCY_UPDATE_LOCAL),true);
-
-
-			if (sources_button->get_popup()->is_item_disabled(sources_button->get_popup()->get_item_index(DEPENDENCY_UPDATE_IMPORTED)))
-				sources_button->set_icon(gui_base->get_icon("DependencyOk","EditorIcons"));
-			else
-				sources_button->set_icon(gui_base->get_icon("DependencyChanged","EditorIcons"));
-
-			*/
 		} break;
 		case DEPENDENCY_UPDATE_IMPORTED: {
 
@@ -2358,6 +2425,19 @@ void EditorNode::remove_editor_plugin(EditorPlugin *p_editor) {
 }
 
 
+void EditorNode::add_editor_import_plugin(const Ref<EditorImportPlugin>& p_editor_import) {
+
+	editor_import_export->add_import_plugin(p_editor_import);
+	_rebuild_import_menu();
+}
+
+void EditorNode::remove_editor_import_plugin(const Ref<EditorImportPlugin>& p_editor_import) {
+
+	editor_import_export->remove_import_plugin(p_editor_import);
+	_rebuild_import_menu();
+}
+
+
 void EditorNode::set_edited_scene(Node *p_scene) {
 
 	if (edited_scene) {
@@ -2369,6 +2449,8 @@ void EditorNode::set_edited_scene(Node *p_scene) {
 	if (edited_scene && edited_scene->cast_to<Popup>())
 		edited_scene->cast_to<Popup>()->show(); //show popups
 	scene_tree_dock->set_edited_scene(edited_scene);
+	if (get_tree())
+		get_tree()->set_edited_scene_root(edited_scene);
 
 	if (edited_scene) {
 		if (p_scene->get_parent()!=scene_root)
@@ -2412,7 +2494,7 @@ void EditorNode::_fetch_translatable_strings(const Object *p_object,Set<StringNa
 
 Error EditorNode::save_translatable_strings(const String& p_to_file) {
 
-	if (!is_inside_scene()) {
+	if (!is_inside_tree()) {
 		defer_translatable=p_to_file;
 		return OK;
 	}
@@ -2606,7 +2688,7 @@ Error EditorNode::save_optimized_copy(const String& p_scene,const String& p_pres
 
 Error EditorNode::load_scene(const String& p_scene) {
 
-	if (!is_inside_scene()) {
+	if (!is_inside_tree()) {
 		defer_load_scene = p_scene;
 		return OK;
 	}
@@ -2654,8 +2736,6 @@ Error EditorNode::load_scene(const String& p_scene) {
 		return ERR_FILE_NOT_FOUND;
 	}
 
-	print_line("OPEN FILENAME: "+new_scene->get_filename());
-
 	/*
 	Node *old_scene = edited_scene;
 	_hide_top_editors();
@@ -2669,10 +2749,10 @@ Error EditorNode::load_scene(const String& p_scene) {
 	}
 */
 	set_edited_scene(new_scene);
-	scene_tree_dock->set_selected(new_scene);
+	_get_scene_metadata();
+	scene_tree_dock->set_selected(new_scene, true);
 	property_editor->edit(new_scene);
 	scene_import_metadata = sdata->get_import_metadata();
-	_get_scene_metadata();
 
 	editor_data.get_undo_redo().clear_history();
 	saved_version=editor_data.get_undo_redo().get_version();
@@ -2698,7 +2778,7 @@ Error EditorNode::load_scene(const String& p_scene) {
 
 	top_pallete->set_current_tab(0); //always go to scene
 
-	//push_item(new_scene);
+	push_item(new_scene);
 
 	return OK;
 }
@@ -2808,6 +2888,8 @@ void EditorNode::animation_editor_make_visible(bool p_visible) {
 		//pd_anim->hide();
 		animation_editor->hide();
 //		scene_root_parent->set_margin(MARGIN_TOP,0);
+		if (!animation_vb->get_parent_control())
+			return;
 		animation_vb->get_parent_control()->minimum_size_changed();
 		top_split->set_collapsed(true);
 	}
@@ -2988,16 +3070,50 @@ void EditorNode::_load_error_notify(void* p_ud,const String& p_text) {
 
 }
 
+
+bool EditorNode::_find_scene_in_use(Node* p_node,const String& p_path) const {
+
+	if (p_node->get_filename()==p_path) {
+		return true;
+	}
+
+	for(int i=0;i<p_node->get_child_count();i++) {
+
+		if (_find_scene_in_use(p_node->get_child(i),p_path)) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+
+bool EditorNode::is_scene_in_use(const String& p_path) {
+
+	Node *es = get_edited_scene();
+	if (es)
+		return _find_scene_in_use(es,p_path);
+	return false;
+
+}
+
 void EditorNode::register_editor_types() {
 
 	ObjectTypeDB::register_type<EditorPlugin>();
 	ObjectTypeDB::register_type<EditorImportPlugin>();
 	ObjectTypeDB::register_type<EditorScenePostImport>();
+	ObjectTypeDB::register_type<EditorScript>();
 
 
 	//ObjectTypeDB::register_type<EditorImporter>();
 //	ObjectTypeDB::register_type<EditorPostImport>();
 }
+
+void EditorNode::unregister_editor_types() {
+
+	_init_callbacks.clear();
+}
+
 
 void EditorNode::stop_child_process() {
 
@@ -3086,6 +3202,9 @@ void EditorNode::_bind_methods() {
 	ObjectTypeDB::bind_method("_sources_changed",&EditorNode::_sources_changed);
 	ObjectTypeDB::bind_method("_fs_changed",&EditorNode::_fs_changed);
 
+	ObjectTypeDB::bind_method(_MD("add_editor_import_plugin", "plugin"), &EditorNode::add_editor_import_plugin);
+	ObjectTypeDB::bind_method(_MD("remove_editor_import_plugin", "plugin"), &EditorNode::remove_editor_import_plugin);
+	ObjectTypeDB::bind_method(_MD("get_gui_base"), &EditorNode::get_gui_base);
 
 	ADD_SIGNAL( MethodInfo("play_pressed") );
 	ADD_SIGNAL( MethodInfo("pause_pressed") );
@@ -3134,6 +3253,7 @@ void EditorNode::_file_dialog_unregister(FileDialog *p_dialog){
 	singleton->file_dialogs.erase(p_dialog);
 }
 
+Vector<EditorNodeInitCallback> EditorNode::_init_callbacks;
 
 Error EditorNode::export_platform(const String& p_platform, const String& p_path, bool p_debug,const String& p_password,bool p_quit_after) {
 
@@ -3145,9 +3265,16 @@ Error EditorNode::export_platform(const String& p_platform, const String& p_path
 	return OK;
 }
 
+void EditorNode::show_warning(const String& p_text) {
+
+	warning->set_text(p_text);
+	warning->popup_centered_minsize();
+}
+
 
 EditorNode::EditorNode() {
 
+	EditorHelp::generate_doc(); //before any editor classes are crated
 
 	singleton=this;
 
@@ -3160,6 +3287,7 @@ EditorNode::EditorNode() {
 		EditorSettings::create();
 
 	ResourceLoader::set_abort_on_missing_resources(false);
+	FileDialog::set_default_show_hidden_files(EditorSettings::get_singleton()->get("file_dialog/show_hidden_files"));
 	ResourceLoader::set_error_notify_func(this,_load_error_notify);
 
 	ResourceLoader::set_timestamp_on_load(true);
@@ -3195,10 +3323,18 @@ EditorNode::EditorNode() {
 	gui_base->set_area_as_parent_rect();
 
 
-	Ref<Theme> theme( memnew( Theme ) );
+	theme = Ref<Theme>( memnew( Theme ) );
 	gui_base->set_theme( theme );
 	editor_register_icons(theme);
 	editor_register_fonts(theme);
+
+	String global_font = EditorSettings::get_singleton()->get("global/font");
+	if (global_font!="") {
+		Ref<Font> fnt = ResourceLoader::load(global_font);
+		if (fnt.is_valid()) {
+			theme->set_default_theme_font(fnt);
+		}
+	}
 
 	Ref<StyleBoxTexture> focus_sbt=memnew( StyleBoxTexture );
 	focus_sbt->set_texture(theme->get_icon("EditorFocus","EditorIcons"));
@@ -3250,13 +3386,13 @@ EditorNode::EditorNode() {
 	main_editor_tabs->connect("tab_changed",this,"_editor_select");
 	HBoxContainer *srth = memnew( HBoxContainer );
 	srt->add_child( srth );
-	EmptyControl *tec = memnew( EmptyControl );
-	tec->set_minsize(Size2(100,0));
+	Control *tec = memnew( Control );
+	tec->set_custom_minimum_size(Size2(100,0));
 	tec->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 	srth->add_child(tec);
 	srth->add_child(main_editor_tabs);
-	tec = memnew( EmptyControl );
-	tec->set_minsize(Size2(100,0));
+	tec = memnew( Control );
+	tec->set_custom_minimum_size(Size2(100,0));
 	srth->add_child(tec);
 	tec->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 
@@ -3280,6 +3416,8 @@ EditorNode::EditorNode() {
 
 
 	scene_root = memnew( Viewport );
+
+
 	//scene_root_base->add_child(scene_root);
 	scene_root->set_meta("_editor_disable_input",true);
 	VisualServer::get_singleton()->viewport_set_hide_scenario(scene_root->get_viewport(),true);
@@ -3364,7 +3502,7 @@ EditorNode::EditorNode() {
 	p->add_item("New Scene",FILE_NEW_SCENE);
 	p->add_item("Open Scene..",FILE_OPEN_SCENE,KEY_MASK_CMD+KEY_O);
 	p->add_item("Save Scene",FILE_SAVE_SCENE,KEY_MASK_CMD+KEY_S);
-	p->add_item("Save Scene As..",FILE_SAVE_AS_SCENE);
+	p->add_item("Save Scene As..",FILE_SAVE_AS_SCENE,KEY_MASK_SHIFT+KEY_MASK_CMD+KEY_S);
 	p->add_separator();
 	p->add_item("Goto Prev. Scene",FILE_OPEN_PREV,KEY_MASK_SHIFT+KEY_MASK_CMD+KEY_P);
 	p->add_submenu_item("Open Recent","RecentScenes",FILE_OPEN_RECENT);
@@ -3388,8 +3526,13 @@ EditorNode::EditorNode() {
 	p->add_item("Undo",EDIT_UNDO,KEY_MASK_CMD+KEY_Z);
 	p->add_item("Redo",EDIT_REDO,KEY_MASK_CMD+KEY_MASK_SHIFT+KEY_Z);
 	p->add_separator();
+	p->add_item("Run Script",FILE_RUN_SCRIPT,KEY_MASK_SHIFT+KEY_MASK_CMD+KEY_R);
+	p->add_separator();
 	p->add_item("Project Settings",RUN_SETTINGS);
 	p->add_separator();
+	p->add_item("Revert Scene",EDIT_REVERT);
+	p->add_separator();
+	p->add_item("Quit to Project List",RUN_PROJECT_MANAGER,KEY_MASK_SHIFT+KEY_MASK_CMD+KEY_Q);
 	p->add_item("Quit",FILE_QUIT,KEY_MASK_CMD+KEY_Q);
 
 	recent_scenes = memnew( PopupMenu );
@@ -3433,11 +3576,6 @@ EditorNode::EditorNode() {
 	left_menu_hb->add_child( import_menu );
 
 	p=import_menu->get_popup();
-	p->add_item("Sub-Scene",FILE_IMPORT_SUBSCENE);
-#ifdef OLD_SCENE_FORMAT_ENABLED
-	p->add_item("Import Old Scene",FILE_OPEN_OLD_SCENE);
-#endif
-	p->add_separator();
 	p->connect("item_pressed",this,"_menu_option");
 
 	export_button = memnew( ToolButton );
@@ -3475,7 +3613,7 @@ EditorNode::EditorNode() {
 	play_button->set_icon(gui_base->get_icon("MainPlay","EditorIcons"));
 	play_button->set_focus_mode(Control::FOCUS_NONE);
 	play_button->connect("pressed", this,"_menu_option",make_binds(RUN_PLAY));
-	play_button->set_tooltip("Start the scene (F5).");
+	play_button->set_tooltip("Play the project (F5).");
 
 
 
@@ -3535,7 +3673,7 @@ EditorNode::EditorNode() {
 	p->set_item_tooltip(p->get_item_index(RUN_FILE_SERVER),"Enable/Disable the File Server.");
 	p->add_separator();
 	p->add_check_item("Deploy Dumb Clients",RUN_DEPLOY_DUMB_CLIENTS);
-	p->set_item_checked( p->get_item_index(RUN_DEPLOY_DUMB_CLIENTS),true );
+	//p->set_item_checked( p->get_item_index(RUN_DEPLOY_DUMB_CLIENTS),true );
 	p->set_item_tooltip(p->get_item_index(RUN_DEPLOY_DUMB_CLIENTS),"Deploy dumb clients when the File Server is active.");
 	p->connect("item_pressed",this,"_menu_option");
 
@@ -3616,8 +3754,8 @@ EditorNode::EditorNode() {
 	top_pallete->add_child(resources_dock);
 	top_pallete->set_v_size_flags(Control::SIZE_EXPAND_FILL);
 
-	EmptyControl *editor_spacer = memnew( EmptyControl );
-	editor_spacer->set_minsize(Size2(260,200));
+	Control *editor_spacer = memnew( Control );
+	editor_spacer->set_custom_minimum_size(Size2(260,200));
 	editor_spacer->set_v_size_flags(Control::SIZE_EXPAND_FILL);
 	editor_vsplit->add_child( editor_spacer );
 	editor_spacer->add_child( top_pallete );
@@ -3628,8 +3766,8 @@ EditorNode::EditorNode() {
 
 	prop_pallete->set_v_size_flags(Control::SIZE_EXPAND_FILL);
 
-	editor_spacer = memnew( EmptyControl );
-	editor_spacer->set_minsize(Size2(260,200));
+	editor_spacer = memnew( Control );
+	editor_spacer->set_custom_minimum_size(Size2(260,200));
 	editor_spacer->set_v_size_flags(Control::SIZE_EXPAND_FILL);
 	editor_vsplit->add_child( editor_spacer );
 	editor_spacer->add_child( prop_pallete );
@@ -3845,6 +3983,8 @@ EditorNode::EditorNode() {
 	logo->set_pos(Point2(20,20));
 	logo->set_texture(gui_base->get_icon("Logo","EditorIcons") );
 
+	warning = memnew( AcceptDialog );
+	add_child(warning);
 
 
 
@@ -3855,7 +3995,7 @@ EditorNode::EditorNode() {
 	file_templates->set_mode(FileDialog::MODE_OPEN_FILE);
 	file_templates->set_access(FileDialog::ACCESS_FILESYSTEM);
 	file_templates->clear_filters();
-	file_templates->add_filter("*.zip ; Zip Template Package");
+	file_templates->add_filter("*.tpz ; Template Package");
 
 
 	file = memnew( FileDialog );
@@ -3892,6 +4032,18 @@ EditorNode::EditorNode() {
 	file_export->get_vbox()->add_margin_child("Password:",file_export_password);
 
 
+	file_script = memnew( FileDialog );
+	file_script->set_title("Open & Run a Script");
+	file_script->set_access(FileDialog::ACCESS_FILESYSTEM);
+	file_script->set_mode(FileDialog::MODE_OPEN_FILE);
+	List<String> sexts;
+	ResourceLoader::get_recognized_extensions_for_type("Script",&sexts);
+	for (List<String>::Element*E=sexts.front();E;E=E->next()) {
+		file_script->add_filter("*."+E->get());
+	}
+	gui_base->add_child(file_script);
+	file_script->connect("file_selected",this,"_dialog_action");
+
 	reimport_dialog = memnew( EditorReImportDialog );
 	gui_base->add_child(reimport_dialog);
 
@@ -3925,32 +4077,33 @@ EditorNode::EditorNode() {
 	Ref<EditorSceneImportPlugin> _scene_import =  memnew(EditorSceneImportPlugin(this) );
 	Ref<EditorSceneImporterCollada> _collada_import = memnew( EditorSceneImporterCollada);
 	_scene_import->add_importer(_collada_import);
+//	Ref<EditorSceneImporterFBXConv> _fbxconv_import = memnew( EditorSceneImporterFBXConv);
+//	_scene_import->add_importer(_fbxconv_import);
 	editor_import_export->add_import_plugin( _scene_import);
 	editor_import_export->add_import_plugin( Ref<EditorSceneAnimationImportPlugin>( memnew(EditorSceneAnimationImportPlugin(this))));
+	editor_import_export->add_import_plugin( Ref<EditorMeshImportPlugin>( memnew(EditorMeshImportPlugin(this))));
 	editor_import_export->add_import_plugin( Ref<EditorFontImportPlugin>( memnew(EditorFontImportPlugin(this))));
 	editor_import_export->add_import_plugin( Ref<EditorSampleImportPlugin>( memnew(EditorSampleImportPlugin(this))));
 	editor_import_export->add_import_plugin( Ref<EditorTranslationImportPlugin>( memnew(EditorTranslationImportPlugin(this))));
 
-	for(int i=0;i<editor_import_export->get_import_plugin_count();i++) {
-		    import_menu->get_popup()->add_item(editor_import_export->get_import_plugin(i)->get_visible_name(),IMPORT_PLUGIN_BASE+i);
-	}
-
+	editor_import_export->add_export_plugin( Ref<EditorTextureExportPlugin>( memnew(EditorTextureExportPlugin)));
 
 	add_editor_plugin( memnew( CanvasItemEditorPlugin(this) ) );
 	add_editor_plugin( memnew( SpatialEditorPlugin(this) ) );
 	add_editor_plugin( memnew( ScriptEditorPlugin(this) ) );
 	add_editor_plugin( memnew( EditorHelpPlugin(this) ) );
 	add_editor_plugin( memnew( AnimationPlayerEditorPlugin(this) ) );
-	//add_editor_plugin( memnew( AnimationEditorPlugin(this) ) ); - not useful anymore
-	add_editor_plugin( memnew( ShaderEditorPlugin(this) ) );
+	add_editor_plugin( memnew( ShaderGraphEditorPlugin(this,true) ) );
+	add_editor_plugin( memnew( ShaderGraphEditorPlugin(this,false) ) );
+	add_editor_plugin( memnew( ShaderEditorPlugin(this,true) ) );
+	add_editor_plugin( memnew( ShaderEditorPlugin(this,false) ) );
 	add_editor_plugin( memnew( CameraEditorPlugin(this) ) );
-	add_editor_plugin( memnew( FontEditorPlugin(this) ) );
 	add_editor_plugin( memnew( SampleEditorPlugin(this) ) );
 	add_editor_plugin( memnew( SampleLibraryEditorPlugin(this) ) );
 	add_editor_plugin( memnew( ThemeEditorPlugin(this) ) );
 	add_editor_plugin( memnew( MultiMeshEditorPlugin(this) ) );
+	add_editor_plugin( memnew( MeshInstanceEditorPlugin(this) ) );
 	add_editor_plugin( memnew( AnimationTreeEditorPlugin(this) ) );
-	//add_editor_plugin( memnew( GridMapEditorPlugin(this) ) );
 	add_editor_plugin( memnew( SamplePlayerEditorPlugin(this) ) );
 	add_editor_plugin( memnew( MeshLibraryEditorPlugin(this) ) );
 	add_editor_plugin( memnew( StreamEditorPlugin(this) ) );
@@ -3960,12 +4113,17 @@ EditorNode::EditorNode() {
 	add_editor_plugin( memnew( ItemListEditorPlugin(this) ) );
 	add_editor_plugin( memnew( RichTextEditorPlugin(this) ) );
 	add_editor_plugin( memnew( CollisionPolygonEditorPlugin(this) ) );
+	add_editor_plugin( memnew( CollisionPolygon2DEditorPlugin(this) ) );
 	add_editor_plugin( memnew( TileSetEditorPlugin(this) ) );
 	add_editor_plugin( memnew( TileMapEditorPlugin(this) ) );
 	add_editor_plugin( memnew( SpriteFramesEditorPlugin(this) ) );
 	add_editor_plugin( memnew( Particles2DEditorPlugin(this) ) );
 	add_editor_plugin( memnew( Path2DEditorPlugin(this) ) );
 	add_editor_plugin( memnew( PathEditorPlugin(this) ) );
+	add_editor_plugin( memnew( BakedLightEditorPlugin(this) ) );
+	add_editor_plugin( memnew( Polygon2DEditorPlugin(this) ) );
+	add_editor_plugin( memnew( LightOccluder2DEditorPlugin(this) ) );
+	add_editor_plugin( memnew( NavigationPolygonEditorPlugin(this) ) );
 
 	for(int i=0;i<EditorPlugins::get_plugin_count();i++)
 		add_editor_plugin( EditorPlugins::create(i,this) );
@@ -3974,9 +4132,7 @@ EditorNode::EditorNode() {
 	circle_step_frame=OS::get_singleton()->get_frames_drawn();;
 	circle_step=0;
 
-
-	import_menu->get_popup()->add_separator();
-	import_menu->get_popup()->add_item("Import Settings",SETTINGS_IMPORT);
+	_rebuild_import_menu();
 
 	editor_plugin_screen=NULL;
 	editor_plugin_over=NULL;
@@ -3991,9 +4147,9 @@ EditorNode::EditorNode() {
 
 	Globals::get_singleton()->set("debug/indicators_enabled",true);
 	Globals::get_singleton()->set("render/room_cull_enabled",false);
-	theme->set_color("prop_category","Editor",Color::hex(0x3f3945ff));
-	theme->set_color("prop_section","Editor",Color::hex(0x38323dff));
-	theme->set_color("prop_subsection","Editor",Color::hex(0x342e39ff));
+	theme->set_color("prop_category","Editor",Color::hex(0x403d41ff));
+	theme->set_color("prop_section","Editor",Color::hex(0x383539ff));
+	theme->set_color("prop_subsection","Editor",Color::hex(0x343135ff));
 	theme->set_color("fg_selected","Editor",Color::html("ffbd8e8e"));
 	theme->set_color("fg_error","Editor",Color::html("ffbd8e8e"));
 
@@ -4076,10 +4232,14 @@ EditorNode::EditorNode() {
 
 
 	EditorSettings::get_singleton()->enable_plugins();
+	Node::set_human_readable_collision_renaming(true);
+
 
 //	Ref<ImageTexture> it = gui_base->get_icon("logo","Icons");
 //	OS::get_singleton()->set_icon( it->get_data() );
 
+	for(int i=0;i<_init_callbacks.size();i++)
+		_init_callbacks[i]();
 
 }
 

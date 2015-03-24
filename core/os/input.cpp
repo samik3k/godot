@@ -29,6 +29,7 @@
 #include "input.h"
 #include "input_map.h"
 #include "os/os.h"
+#include "globals.h"
 Input *Input::singleton=NULL;
 
 Input *Input::get_singleton() {
@@ -53,15 +54,45 @@ void Input::_bind_methods() {
 	ObjectTypeDB::bind_method(_MD("is_joy_button_pressed","device","button"),&Input::is_joy_button_pressed);
 	ObjectTypeDB::bind_method(_MD("is_action_pressed","action"),&Input::is_action_pressed);
 	ObjectTypeDB::bind_method(_MD("get_joy_axis","device","axis"),&Input::get_joy_axis);
+	ObjectTypeDB::bind_method(_MD("get_joy_name","device"),&Input::get_joy_name);
 	ObjectTypeDB::bind_method(_MD("get_accelerometer"),&Input::get_accelerometer);
 	ObjectTypeDB::bind_method(_MD("get_mouse_pos"),&Input::get_mouse_pos);
 	ObjectTypeDB::bind_method(_MD("get_mouse_speed"),&Input::get_mouse_speed);
+	ObjectTypeDB::bind_method(_MD("get_mouse_button_mask"),&Input::get_mouse_button_mask);
 	ObjectTypeDB::bind_method(_MD("set_mouse_mode","mode"),&Input::set_mouse_mode);
 	ObjectTypeDB::bind_method(_MD("get_mouse_mode"),&Input::get_mouse_mode);
+	ObjectTypeDB::bind_method(_MD("warp_mouse_pos","to"),&Input::warp_mouse_pos);
+	ObjectTypeDB::bind_method(_MD("action_press"),&Input::action_press);
+	ObjectTypeDB::bind_method(_MD("action_release"),&Input::action_release);
 
 	BIND_CONSTANT( MOUSE_MODE_VISIBLE );
 	BIND_CONSTANT( MOUSE_MODE_HIDDEN );
 	BIND_CONSTANT( MOUSE_MODE_CAPTURED );
+
+	ADD_SIGNAL( MethodInfo("joy_connection_changed", PropertyInfo(Variant::INT, "index"), PropertyInfo(Variant::BOOL, "connected")) );
+}
+
+void Input::get_argument_options(const StringName& p_function,int p_idx,List<String>*r_options) const {
+#ifdef TOOLS_ENABLED
+
+	String pf=p_function;
+	if (p_idx==0 && (pf=="is_action_pressed" || pf=="action_press" || pf=="action_release")) {
+
+		List<PropertyInfo> pinfo;
+		Globals::get_singleton()->get_property_list(&pinfo);
+
+		for(List<PropertyInfo>::Element *E=pinfo.front();E;E=E->next()) {
+			const PropertyInfo &pi=E->get();
+
+			if (!pi.name.begins_with("input/"))
+				continue;
+
+			String name = pi.name.substr(pi.name.find("/")+1,pi.name.length());
+			r_options->push_back("\""+name+"\"");
+
+		}
+	}
+#endif
 
 }
 
@@ -192,6 +223,20 @@ float InputDefault::get_joy_axis(int p_device,int p_axis) {
 	}
 }
 
+String InputDefault::get_joy_name(int p_idx) {
+
+	_THREAD_SAFE_METHOD_
+	return joy_names[p_idx];
+};
+
+void InputDefault::joy_connection_changed(int p_idx, bool p_connected, String p_name) {
+
+	_THREAD_SAFE_METHOD_
+	joy_names[p_idx] = p_connected ? p_name : "";
+
+	emit_signal("joy_connection_changed", p_idx, p_connected);
+};
+
 Vector3 InputDefault::get_accelerometer() {
 
 	_THREAD_SAFE_METHOD_
@@ -209,6 +254,8 @@ void InputDefault::parse_input_event(const InputEvent& p_event) {
 				break;
 			if (p_event.key.scancode==0)
 				break;
+
+		//	print_line(p_event);
 
 			if (p_event.key.pressed)
 				keys_pressed.insert(p_event.key.scancode);
@@ -279,6 +326,17 @@ Point2 InputDefault::get_mouse_speed() const {
 
 	return mouse_speed_track.speed;
 }
+
+int InputDefault::get_mouse_button_mask() const {
+
+	return OS::get_singleton()->get_mouse_button_state();
+}
+
+void InputDefault::warp_mouse_pos(const Vector2& p_to) {
+
+	OS::get_singleton()->warp_mouse_pos(p_to);
+}
+
 
 void InputDefault::iteration(float p_step) {
 

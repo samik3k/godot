@@ -78,6 +78,7 @@ public:
 	virtual String get_next(bool* p_is_dir); // compatibility
 	virtual String get_next()=0;
 	virtual bool current_is_dir() const=0;
+	virtual bool current_is_hidden() const=0;
 	
 	virtual void list_dir_end()=0; ///< 
 	
@@ -91,7 +92,7 @@ public:
 	virtual Error erase_contents_recursive(); //super dangerous, use with care!
 
 	virtual bool file_exists(String p_file)=0;
-
+	virtual bool dir_exists(String p_dir)=0;
 
 	virtual size_t get_space_left()=0;
 

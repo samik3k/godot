@@ -46,8 +46,9 @@ public:
 	struct PackedFile {
 
 		String pack;
-		uint64_t offset;
+		uint64_t offset; //if offset is ZERO, the file was ERASED
 		uint64_t size;
+		uint8_t md5[16];
 		PackSource* src;
 	};
 
@@ -59,8 +60,34 @@ private:
 		Set<String> files;
 	};
 
+	struct PathMD5 {
+		uint64_t a;
+		uint64_t b;
+		bool operator < (const PathMD5& p_md5) const {
 
-	Map<String,PackedFile> files;
+			if (p_md5.a == a) {
+				return b < p_md5.b;
+			} else {
+				return a < p_md5.a;
+			}
+		}
+
+		bool operator == (const PathMD5& p_md5) const {
+			return a == p_md5.a && b == p_md5.b;
+		};
+
+		PathMD5() {
+			a = b = 0;
+		};
+
+		PathMD5(const Vector<uint8_t> p_buf) {
+			a = *((uint64_t*)&p_buf[0]);
+			b = *((uint64_t*)&p_buf[8]);
+		};
+	};
+
+	Map<PathMD5,PackedFile> files;
+
 	Vector<PackSource*> sources;
 
 	PackedDir *root;
@@ -72,7 +99,7 @@ private:
 public:
 
 	void add_pack_source(PackSource* p_source);
-	void add_path(const String& pkg_path, const String& path, uint64_t ofs, uint64_t size, PackSource* p_src); // for PackSource
+	void add_path(const String& pkg_path, const String& path, uint64_t ofs, uint64_t size,const uint8_t* p_md5, PackSource* p_src); // for PackSource
 
 	void set_disabled(bool p_disabled) { disabled=p_disabled; }
 	_FORCE_INLINE_ bool is_disabled() const { return disabled; }
@@ -150,16 +177,20 @@ public:
 
 FileAccess *PackedData::try_open_path(const String& p_path) {
 
-	if (files.has(p_path)) {
-		return files[p_path].src->get_file(p_path, &files[p_path]);
-	}
+	//print_line("try open path " + p_path);
+	PathMD5 pmd5(p_path.md5_buffer());
+	Map<PathMD5,PackedFile>::Element *E=files.find(pmd5);
+	if (!E)
+		return NULL; //not found
+	if (E->get().offset==0)
+		return NULL; //was erased
 
-	return NULL;
+	return E->get().src->get_file(p_path, &E->get());
 }
 
 bool PackedData::has_path(const String& p_path) {
 
-	return files.has(p_path);
+	return files.has(PathMD5(p_path.md5_buffer()));
 }
 
 
@@ -177,6 +208,7 @@ public:
 	virtual bool list_dir_begin();
 	virtual String get_next();
 	virtual bool current_is_dir() const;
+	virtual bool current_is_hidden() const;
 	virtual void list_dir_end();
 
 	virtual int get_drive_count();
@@ -187,6 +219,7 @@ public:
 
 
 	virtual bool file_exists(String p_file);
+	virtual bool dir_exists(String p_dir);
 
 	virtual Error make_dir(String p_dir);
 

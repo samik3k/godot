@@ -20,6 +20,7 @@
 #include "etc1/image_etc.h"
 #include "chibi/event_stream_chibi.h"
 
+
 #ifdef TOOLS_ENABLED
 #include "squish/image_compress_squish.h"
 #endif
@@ -42,8 +43,10 @@
 #endif
 
 #ifdef THEORA_ENABLED
-#include "theora/video_stream_theora.h"
+//#include "theora/video_stream_theora.h"
+#include "theoraplayer/video_stream_theoraplayer.h"
 #endif
+
 
 #include "drivers/trex/regex.h"
 
@@ -87,11 +90,16 @@ static ResourceFormatLoaderAudioStreamSpeex *speex_stream_loader=NULL;
 #endif
 
 #ifdef THEORA_ENABLED
-static ResourceFormatLoaderVideoStreamTheora* theora_stream_loader = NULL;
+//static ResourceFormatLoaderVideoStreamTheora* theora_stream_loader = NULL;
+static ResourceFormatLoaderVideoStreamTheoraplayer* theoraplayer_stream_loader = NULL;
 #endif
 
 #ifdef MUSEPACK_ENABLED
 static ResourceFormatLoaderAudioStreamMPC * mpc_stream_loader=NULL;
+#endif
+
+#ifdef OPENSSL_ENABLED
+#include "openssl/register_openssl.h"
 #endif
 
 void register_core_driver_types() {
@@ -191,11 +199,20 @@ void register_driver_types() {
 
 #endif
 
-#ifdef THEORA_ENABLED
-	theora_stream_loader = memnew( ResourceFormatLoaderVideoStreamTheora );
-	ResourceLoader::add_resource_format_loader(theora_stream_loader);
-	ObjectTypeDB::register_type<VideoStreamTheora>();
+#ifdef OPENSSL_ENABLED
+
+	register_openssl();
 #endif
+
+#ifdef THEORA_ENABLED
+	//theora_stream_loader = memnew( ResourceFormatLoaderVideoStreamTheora );
+	//ResourceLoader::add_resource_format_loader(theora_stream_loader);
+	//ObjectTypeDB::register_type<VideoStreamTheora>();
+	theoraplayer_stream_loader = memnew( ResourceFormatLoaderVideoStreamTheoraplayer );
+	ResourceLoader::add_resource_format_loader(theoraplayer_stream_loader);
+	ObjectTypeDB::register_type<VideoStreamTheoraplayer>();
+#endif
+
 
 #ifdef TOOLS_ENABLED
 #ifdef SQUISH_ENABLED
@@ -224,8 +241,8 @@ void unregister_driver_types() {
 #endif
 
 #ifdef THEORA_ENABLED
-
-	memdelete (theora_stream_loader);
+	//memdelete (theora_stream_loader);
+	memdelete (theoraplayer_stream_loader);
 #endif
 
 #ifdef MUSEPACK_ENABLED
@@ -239,6 +256,11 @@ void unregister_driver_types() {
 
 #ifdef PVR_ENABLED
 	memdelete(resource_loader_pvr);
+#endif
+
+#ifdef OPENSSL_ENABLED
+
+	unregister_openssl();
 #endif
 
 	finalize_chibi();

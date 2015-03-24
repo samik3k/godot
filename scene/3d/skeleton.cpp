@@ -43,7 +43,8 @@ bool Skeleton::_set(const StringName& p_path, const Variant& p_value) {
 		
 	int which=path.get_slice("/",1).to_int();
 	String what=path.get_slice("/",2);
-	
+
+
 	if (which==bones.size() && what=="name") {
 	
 		add_bone(p_value);
@@ -94,7 +95,7 @@ bool Skeleton::_get(const StringName& p_name,Variant &r_ret) const {
 	
 	if (what=="name")
 		r_ret=get_bone_name(which);
-	if (what=="parent")
+	else if (what=="parent")
 		r_ret=get_bone_parent(which);
 	else if (what=="rest")
 		r_ret=get_bone_rest(which);
@@ -236,6 +237,29 @@ Transform Skeleton::get_bone_transform(int p_bone) const {
 	return bones[p_bone].pose_global * bones[p_bone].rest_global_inverse;
 }
 
+
+void Skeleton::set_bone_global_pose(int p_bone,const Transform& p_pose) {
+
+	ERR_FAIL_INDEX(p_bone,bones.size());
+	if (bones[p_bone].parent==-1) {
+
+		set_bone_pose(p_bone,bones[p_bone].rest_global_inverse * p_pose); //fast
+	} else {
+
+		set_bone_pose(p_bone, bones[p_bone].rest.affine_inverse() * (get_bone_global_pose(bones[p_bone].parent).affine_inverse() * p_pose)); //slow
+
+	}
+
+}
+
+Transform Skeleton::get_bone_global_pose(int p_bone) const {
+
+	ERR_FAIL_INDEX_V(p_bone,bones.size(),Transform());
+	if (dirty)
+		const_cast<Skeleton*>(this)->notification(NOTIFICATION_UPDATE_SKELETON);
+	return bones[p_bone].pose_global;
+}
+
 RID Skeleton::get_skeleton() const {
 
 	return skeleton;
@@ -250,7 +274,7 @@ void Skeleton::add_bone(const String& p_name) {
 	
 		ERR_FAIL_COND( bones[i].name=="p_name");
 	}
-	
+
 	Bone b;
 	b.name=p_name;
 	bones.push_back(b);
@@ -380,7 +404,7 @@ void Skeleton::clear_bones() {
 void Skeleton::set_bone_pose(int p_bone, const Transform& p_pose) {
 
 	ERR_FAIL_INDEX( p_bone, bones.size() );
-	ERR_FAIL_COND( !is_inside_scene() );
+	ERR_FAIL_COND( !is_inside_tree() );
 	
 
 	bones[p_bone].pose=p_pose;
@@ -418,7 +442,7 @@ void Skeleton::_make_dirty() {
 	if (dirty)
 		return;
 		
-	if (!is_inside_scene()) {
+	if (!is_inside_tree()) {
 		dirty=true;
 		return;
 	}
@@ -444,7 +468,7 @@ RES Skeleton::_get_gizmo_geometry() const {
 	mat->set_flag(Material::FLAG_DOUBLE_SIDED,true);
 	mat->set_flag(Material::FLAG_UNSHADED,true);
 	mat->set_flag(Material::FLAG_ONTOP,true);
-	mat->set_hint(Material::HINT_NO_DEPTH_DRAW,true);
+//	mat->set_hint(Material::HINT_NO_DEPTH_DRAW,true);
 
 	surface_tool->begin(Mesh::PRIMITIVE_LINES);
 	surface_tool->set_material(mat);
@@ -509,6 +533,9 @@ void Skeleton::_bind_methods() {
 	
 	ObjectTypeDB::bind_method(_MD("get_bone_pose","bone_idx"),&Skeleton::get_bone_pose);
 	ObjectTypeDB::bind_method(_MD("set_bone_pose","bone_idx","pose"),&Skeleton::set_bone_pose);
+
+	ObjectTypeDB::bind_method(_MD("set_bone_global_pose","bone_idx","pose"),&Skeleton::set_bone_global_pose);
+	ObjectTypeDB::bind_method(_MD("get_bone_global_pose","bone_idx"),&Skeleton::get_bone_global_pose);
 
 	ObjectTypeDB::bind_method(_MD("get_bone_custom_pose","bone_idx"),&Skeleton::get_bone_custom_pose);
 	ObjectTypeDB::bind_method(_MD("set_bone_custom_pose","bone_idx","custom_pose"),&Skeleton::set_bone_custom_pose);

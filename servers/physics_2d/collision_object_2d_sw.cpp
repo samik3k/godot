@@ -55,6 +55,14 @@ void CollisionObject2DSW::set_shape(int p_index,Shape2DSW *p_shape){
 	_shapes_changed();
 
 }
+
+void CollisionObject2DSW::set_shape_metadata(int p_index,const Variant& p_metadata) {
+
+	ERR_FAIL_INDEX(p_index,shapes.size());
+	shapes[p_index].metadata=p_metadata;
+
+}
+
 void CollisionObject2DSW::set_shape_transform(int p_index,const Matrix32& p_transform){
 
 	ERR_FAIL_INDEX(p_index,shapes.size());
@@ -129,6 +137,7 @@ void CollisionObject2DSW::_update_shapes() {
 
 	if (!space)
 		return;
+
 
 	for(int i=0;i<shapes.size();i++) {
 
@@ -217,4 +226,7 @@ CollisionObject2DSW::CollisionObject2DSW(Type p_type) {
 	type=p_type;
 	space=NULL;
 	instance_id=0;
+	user_mask=0;
+	layer_mask=1;
+	pickable=true;
 }

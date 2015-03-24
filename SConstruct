@@ -1,5 +1,6 @@
 EnsureSConsVersion(0,14);
 
+import string
 import os
 import os.path
 import glob
@@ -47,8 +48,7 @@ for x in glob.glob("platform/*"):
 module_list=methods.detect_modules()
 
 
-print "Detected Platforms: "+str(platform_list)
-print("Detected Modules: "+str(module_list))
+#print "Detected Platforms: "+str(platform_list)
 
 methods.save_active_platforms(active_platforms,active_platform_ids)
 
@@ -67,12 +67,16 @@ env_base.android_source_modules=[]
 env_base.android_source_files=[]
 env_base.android_module_libraries=[]
 env_base.android_manifest_chunk=""
+env_base.android_permission_chunk=""
+env_base.android_appattributes_chunk=""
 env_base.disabled_modules=[]
 
 env_base.__class__.android_module_source = methods.android_module_source
 env_base.__class__.android_module_library = methods.android_module_library
 env_base.__class__.android_module_file = methods.android_module_file
 env_base.__class__.android_module_manifest = methods.android_module_manifest
+env_base.__class__.android_module_permission = methods.android_module_permission
+env_base.__class__.android_module_attribute = methods.android_module_attribute
 env_base.__class__.disable_module = methods.disable_module
 
 env_base.__class__.add_source_files = methods.add_source_files
@@ -87,21 +91,18 @@ if profile:
 	elif os.path.isfile(profile+".py"):
 		customs.append(profile+".py")
 
-opts=Options(customs, ARGUMENTS)
-opts.Add('target', 'Compile Target (debug/profile/release).', "debug")
-opts.Add('platform','Platform: '+str(platform_list)+'(sfml).',"")
-opts.Add('python','Build Python Support: (yes/no)','no')
-opts.Add('squirrel','Build Squirrel Support: (yes/no)','no')
+opts=Variables(customs, ARGUMENTS)
+opts.Add('target', 'Compile Target (debug/release_debug/release).', "debug")
+opts.Add('bits', 'Compile Target Bits (default/32/64).', "default")
+opts.Add('platform','Platform: '+str(platform_list)+'.',"")
+opts.Add('p','Platform (same as platform=).',"")
 opts.Add('tools','Build Tools (Including Editor): (yes/no)','yes')
-opts.Add('lua','Build Lua Support: (yes/no)','no')
-opts.Add('rfd','Remote Filesystem Driver: (yes/no)','no')
 opts.Add('gdscript','Build GDSCript support: (yes/no)','yes')
 opts.Add('vorbis','Build Ogg Vorbis Support: (yes/no)','yes')
 opts.Add('minizip','Build Minizip Archive Support: (yes/no)','yes')
-opts.Add('opengl', 'Build OpenGL Support: (yes/no)', 'yes')
-opts.Add('game', 'Game (custom) Code Directory', "")
-opts.Add('squish','Squish BC Texture Compression (yes/no)','yes')
+opts.Add('squish','Squish BC Texture Compression in editor (yes/no)','yes')
 opts.Add('theora','Theora Video (yes/no)','yes')
+opts.Add('use_theoraplayer_binary', "Use precompiled binaries from libtheoraplayer for ogg/theora/vorbis (yes/no)", "no")
 opts.Add('freetype','Freetype support in editor','yes')
 opts.Add('speex','Speex Audio (yes/no)','yes')
 opts.Add('xml','XML Save/Load support (yes/no)','yes')
@@ -111,16 +112,15 @@ opts.Add('webp','WEBP Image loader support (yes/no)','yes')
 opts.Add('dds','DDS Texture loader support (yes/no)','yes')
 opts.Add('pvr','PVR (PowerVR) Texture loader support (yes/no)','yes')
 opts.Add('builtin_zlib','Use built-in zlib (yes/no)','yes')
+opts.Add('openssl','Use OpenSSL (yes/no/builtin)','no')
 opts.Add('musepack','Musepack Audio (yes/no)','yes')
-opts.Add('default_gui_theme','Default GUI theme (yes/no)','yes')
 opts.Add("CXX", "Compiler");
-opts.Add("nedmalloc", "Add nedmalloc support", 'yes');
 opts.Add("CCFLAGS", "Custom flags for the C++ compiler");
 opts.Add("CFLAGS", "Custom flags for the C compiler");
 opts.Add("LINKFLAGS", "Custom flags for the linker");
 opts.Add('disable_3d', 'Disable 3D nodes for smaller executable (yes/no)', "no")
 opts.Add('disable_advanced_gui', 'Disable advance 3D gui nodes and behaviors (yes/no)', "no")
-opts.Add('old_scenes', 'Compatibility with old-style scenes', "yes")
+opts.Add('colored', 'Enable colored output for the compilation (yes/no)', 'no')
 
 # add platform specific options
 
@@ -138,9 +138,8 @@ Help(opts.GenerateHelpText(env_base)) # generate help
 # add default include paths
 
 env_base.Append(CPPPATH=['#core','#core/math','#tools','#drivers','#'])
-	
-# configure ENV for platform	
-env_base.detect_python=True
+
+# configure ENV for platform
 env_base.platform_exporters=platform_exporters
 
 """
@@ -157,22 +156,86 @@ if (env_base['target']=='debug'):
 
 env_base.platforms = {}
 
-for p in platform_list:
 
-	sys.path.append("./platform/"+p)
+selected_platform =""
+
+if env_base['platform'] != "":
+	selected_platform=env_base['platform']
+elif env_base['p'] != "":
+	selected_platform=env_base['p']
+	env_base["platform"]=selected_platform
+
+
+if selected_platform in platform_list:
+
+	sys.path.append("./platform/"+selected_platform)
 	import detect
 	if "create" in dir(detect):
 		env = detect.create(env_base)
 	else:
 		env = env_base.Clone()
+
+	env.extra_suffix=""
+
+	CCFLAGS = env.get('CCFLAGS', '')
+	env['CCFLAGS'] = ''
+
+	env.Append(CCFLAGS=string.split(str(CCFLAGS)))
+
+	CFLAGS = env.get('CFLAGS', '')
+	env['CFLAGS'] = ''
+
+	env.Append(CFLAGS=string.split(str(CFLAGS)))
+
+	LINKFLAGS = env.get('LINKFLAGS', '')
+	env['LINKFLAGS'] = ''
+
+	env.Append(LINKFLAGS=string.split(str(LINKFLAGS)))
+
 	detect.configure(env)
-	env['platform'] = p
-	sys.path.remove("./platform/"+p)
+
+
+	flag_list = platform_flags[selected_platform]
+	for f in flag_list:
+		if not (f[0] in ARGUMENTS): # allow command line to override platform flags
+			env[f[0]] = f[1]
+
+        #env['platform_libsuffix'] = env['LIBSUFFIX']
+
+	suffix="."+selected_platform
+
+	if (env["target"]=="release"):
+		if (env["tools"]=="yes"):
+			print("Tools can only be built with targets 'debug' and 'release_debug'.")
+			sys.exit(255)
+		suffix+=".opt"
+
+	elif (env["target"]=="release_debug"):
+		if (env["tools"]=="yes"):
+			suffix+=".opt.tools"
+		else:
+			suffix+=".opt.debug"
+	else:
+		if (env["tools"]=="yes"):
+			suffix+=".tools"
+		else:
+			suffix+=".debug"
+
+	if (env["bits"]=="32"):
+		suffix+=".32"
+	elif (env["bits"]=="64"):
+		suffix+=".64"
+
+	suffix+=env.extra_suffix
+
+	env["PROGSUFFIX"]=suffix+env["PROGSUFFIX"]
+	env["OBJSUFFIX"]=suffix+env["OBJSUFFIX"]
+	env["LIBSUFFIX"]=suffix+env["LIBSUFFIX"]
+	env["SHLIBSUFFIX"]=suffix+env["SHLIBSUFFIX"]
+
+	sys.path.remove("./platform/"+selected_platform)
 	sys.modules.pop('detect')
 
-	flag_list = platform_flags[p]
-	for f in flag_list:
-                env[f[0]] = f[1]
 
 	env.module_list=[]
 
@@ -183,7 +246,7 @@ for p in platform_list:
 		sys.path.append(tmppath)
 		env.current_module=x
 		import config
-		if (config.can_build(p)):
+		if (config.can_build(selected_platform)):
 			config.configure(env)
 			env.module_list.append(x)
 		sys.path.remove(tmppath)
@@ -192,26 +255,17 @@ for p in platform_list:
 
 	if (env['musepack']=='yes'):
 		env.Append(CPPFLAGS=['-DMUSEPACK_ENABLED']);
+        if (env['openssl']!='no'):
+            env.Append(CPPFLAGS=['-DOPENSSL_ENABLED']);
+            if (env['openssl']=="builtin"):
+                env.Append(CPPPATH=['#drivers/builtin_openssl2'])
 
-	if (env["old_scenes"]=='yes'):
-		env.Append(CPPFLAGS=['-DOLD_SCENE_FORMAT_ENABLED'])
-	if (env["rfd"]=='yes'):
-		env.Append(CPPFLAGS=['-DRFD_ENABLED'])
 	if (env["builtin_zlib"]=='yes'):
 		env.Append(CPPPATH=['#drivers/builtin_zlib/zlib'])
-
-	if (env['squirrel']=='yes'):
-
-		env.Append(CPPFLAGS=['-DSQUIRREL_ENABLED'])
-		env.Append(CPPPATH=['#script/squirrel/src'])
 
 	# to test 64 bits compiltion
 	# env.Append(CPPFLAGS=['-m64'])
 
-	if (env['lua']=='yes'):
-
-		env.Append(CPPFLAGS=['-DLUA_ENABLED'])
-		env.Append(CPPPATH=['#script/lua/src'])
 	if (env_base['squish']=='yes'):
 		env.Append(CPPFLAGS=['-DSQUISH_ENABLED']);
 
@@ -250,34 +304,9 @@ for p in platform_list:
 	if (env['xml']=='yes'):
 		env.Append(CPPFLAGS=['-DXML_ENABLED'])
 
-	if (env['default_gui_theme']=='no'):
-		env.Append(CPPFLAGS=['-DDEFAULT_THEME_DISABLED'])
-
-	if (env["python"]=='yes'):
-		detected=False;
-		if (env.detect_python):
-			print("Python 3.0 Prefix:");
-			pycfg_exec="python3-config"
-			errorval=os.system(pycfg_exec+" --prefix")
-			prefix=""
-			if (not errorval):
-				#gah, why can't it get both at the same time like pkg-config, sdl-config, etc?
-				env.ParseConfig(pycfg_exec+" --cflags")
-				env.ParseConfig(pycfg_exec+" --libs")
-				detected=True
-
-		if (detected):
-			env.Append(CPPFLAGS=['-DPYTHON_ENABLED'])
-			#remove annoying warnings
-			if ('-Wstrict-prototypes' in  env["CCFLAGS"]):
-				env["CCFLAGS"].remove('-Wstrict-prototypes');
-			if ('-fwrapv' in env["CCFLAGS"]):
-				env["CCFLAGS"].remove('-fwrapv');
-		else:
-			print("Python 3.0 not detected ("+pycfg_exec+") support disabled.");
-
-	#if env['nedmalloc'] == 'yes':
-	#	env.Append(CPPFLAGS = ['-DNEDMALLOC_ENABLED'])
+	if (env['colored']=='yes'):
+		methods.colored(sys,env)
+		
 
 	Export('env')
 
@@ -287,15 +316,18 @@ for p in platform_list:
 	SConscript("servers/SCsub")
 	SConscript("scene/SCsub")
 	SConscript("tools/SCsub")
-	SConscript("script/SCsub");
 	SConscript("drivers/SCsub")
 	SConscript("bin/SCsub")
-
-	if env['game']:
-		SConscript(env['game']+'/SCsub')
 
 	SConscript("modules/SCsub")
 	SConscript("main/SCsub")
 
-	SConscript("platform/"+p+"/SCsub"); # build selected platform
+	SConscript("platform/"+selected_platform+"/SCsub"); # build selected platform
 
+else:
+
+	print("No valid target platform selected.")
+	print("The following were detected:")
+	for x in platform_list:
+		print("\t"+x)
+	print("\nPlease run scons again with argument: platform=<string>")

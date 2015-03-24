@@ -91,9 +91,14 @@ public:
 		IMAGE_FLAG_COMPRESS_EXTRA=8, // used for pvrtc2
 		IMAGE_FLAG_NO_MIPMAPS=16, //normal for 2D games
 		IMAGE_FLAG_REPEAT=32, //usually disabled in 2D
-		IMAGE_FLAG_FILTER=64 //almost always enabled
+		IMAGE_FLAG_FILTER=64, //almost always enabled
+		IMAGE_FLAG_PREMULT_ALPHA=128,//almost always enabled
+		IMAGE_FLAG_CONVERT_TO_LINEAR=256, //convert image to linear
+		IMAGE_FLAG_CONVERT_NORMAL_TO_XY=512, //convert image to linear
+		IMAGE_FLAG_USE_ANISOTROPY=1024, //convert image to linear
 	};
 
+	Mode get_mode() const { return mode; }
 	virtual String get_name() const;
 	virtual String get_visible_name() const;
 	virtual void import_dialog(const String& p_from="");
@@ -106,6 +111,16 @@ public:
 };
 
 
+class EditorTextureExportPlugin : public EditorExportPlugin {
+
+	OBJ_TYPE( EditorTextureExportPlugin, EditorExportPlugin);
+
+
+public:
+
+	virtual Vector<uint8_t> custom_export(String& p_path,const Ref<EditorExportPlatform> &p_platform);
+	EditorTextureExportPlugin();
+};
 class EditorImportTextureOptions : public VBoxContainer {
 
 	OBJ_TYPE( EditorImportTextureOptions, VBoxContainer );
@@ -116,6 +131,7 @@ class EditorImportTextureOptions : public VBoxContainer {
 	HSlider *quality;
 	Tree *flags;
 	Vector<TreeItem*> items;
+	Label *notice_for_2d;
 
 	bool updating;
 
@@ -139,6 +155,8 @@ public:
 
 	void set_quality(float p_quality);
 	float get_quality() const;
+
+	void show_2d_notice();
 
 	EditorImportTextureOptions();
 

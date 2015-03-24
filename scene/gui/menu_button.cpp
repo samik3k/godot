@@ -84,6 +84,7 @@ void MenuButton::pressed() {
 	popup->set_parent_rect( Rect2(Point2(gp-popup->get_global_pos()),get_size()));
 	popup->popup();
 	popup->call_deferred("grab_click_focus");
+	popup->set_invalidate_click_until_motion();
 	
 }
 
@@ -141,7 +142,7 @@ MenuButton::MenuButton() {
 	popup->hide();
 	add_child(popup);
 	popup->set_as_toplevel(true);
-	add_to_group("unhandled_key_input");
+	set_process_unhandled_key_input(true);
 	set_click_on_press(true);
 }
 

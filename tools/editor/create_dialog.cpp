@@ -225,7 +225,7 @@ void CreateDialog::_confirmed() {
 
 void CreateDialog::_notification(int p_what) {
 
-	if (p_what==NOTIFICATION_ENTER_SCENE) {
+	if (p_what==NOTIFICATION_ENTER_TREE) {
 
 		connect("confirmed",this,"_confirmed");
 		_update_search();
@@ -245,6 +245,7 @@ void CreateDialog::_notification(int p_what) {
 void CreateDialog::set_base_type(const String& p_base) {
 
 	base_type=p_base;
+	set_title("Create New "+p_base);
 	_update_search();
 }
 
@@ -288,13 +289,14 @@ CreateDialog::CreateDialog() {
 	search_box->connect("input_event",this,"_sbox_input");
 	search_options = memnew( Tree );
 	vbc->add_margin_child("Matches:",search_options,true);
-	get_ok()->set_text("Open");
+	get_ok()->set_text("Create");
 	get_ok()->set_disabled(true);
 	register_text_enter(search_box);
 	set_hide_on_ok(false);
 	search_options->connect("item_activated",this,"_confirmed");
 //	search_options->set_hide_root(true);
 	base_type="Object";
+
 }
 
 

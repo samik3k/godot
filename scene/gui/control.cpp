@@ -183,7 +183,7 @@ bool Control::_set(const StringName& p_name, const Variant& p_value) {
 
 void Control::_update_minimum_size() {
 
-	if (!is_inside_scene())
+	if (!is_inside_tree())
 		return;
 
 	data.pending_min_size_update=false;
@@ -341,21 +341,23 @@ void Control::_notification(int p_notification) {
 
 	switch(p_notification) {
 
-		case NOTIFICATION_ENTER_SCENE: {
+		case NOTIFICATION_ENTER_TREE: {
 
 			if (data.window==this) {
 
 				window = memnew( Window );
-				add_to_group("_gui_input");
+				add_to_group("_vp_gui_input"+itos(get_viewport()->get_instance_ID()));
 				add_to_group("windows");
 
 				window->tooltip_timer = memnew( Timer );
 				add_child(window->tooltip_timer);
+				window->tooltip_timer->force_parent_owned();
 				window->tooltip_timer->set_wait_time( GLOBAL_DEF("display/tooltip_delay",0.7));
 				window->tooltip_timer->connect("timeout",this,"_window_show_tooltip");
 				window->tooltip=NULL;
 				window->tooltip_popup = memnew( TooltipPanel );
 				add_child(window->tooltip_popup);
+				window->tooltip_popup->force_parent_owned();
 				window->tooltip_label = memnew( TooltipLabel );
 				window->tooltip_popup->add_child(window->tooltip_label);
 				window->tooltip_popup->set_as_toplevel(true);
@@ -363,7 +365,7 @@ void Control::_notification(int p_notification) {
 				window->drag_attempted=false;
 				window->drag_preview=NULL;
 
-				if (get_scene()->is_editor_hint()) {
+				if (get_tree()->is_editor_hint()) {
 
 					Node *n = this;
 					while(n) {
@@ -383,7 +385,7 @@ void Control::_notification(int p_notification) {
 			_size_changed();
 
 		} break;
-		case NOTIFICATION_EXIT_SCENE: {
+		case NOTIFICATION_EXIT_TREE: {
 
 			if (data.window) {
 
@@ -399,7 +401,7 @@ void Control::_notification(int p_notification) {
 
 			if (window) {
 
-				remove_from_group("_gui_input");
+				remove_from_group("_vp_gui_input"+itos(get_viewport()->get_instance_ID()));
 				remove_from_group("windows");
 				if (window->tooltip_timer)
 					memdelete(window->tooltip_timer);
@@ -628,7 +630,7 @@ void Control::_notification(int p_notification) {
 			}
 
 		} break;
-		case SceneMainLoop::NOTIFICATION_WM_UNFOCUS_REQUEST: {
+		case SceneTree::NOTIFICATION_WM_UNFOCUS_REQUEST: {
 
 			if (!window)
 				return;
@@ -640,19 +642,6 @@ void Control::_notification(int p_notification) {
 
 
 	}
-}
-
-
-Size2 Control::_window_get_pos() const {
-
-	if (data.viewport) {
-
-		Rect2 r = data.viewport->get_visible_rect();
-		return r.pos;
-	} else
-		return Point2();
-
-	//return get_global_transform().get_origin();
 }
 
 
@@ -721,7 +710,7 @@ void Control::drop_data(const Point2& p_point,const Variant& p_data){
 
 void Control::force_drag(const Variant& p_data,Control *p_control) {
 
-	ERR_FAIL_COND(!is_inside_scene());
+	ERR_FAIL_COND(!is_inside_tree());
 	ERR_FAIL_COND(!data.window);
 	ERR_FAIL_COND(p_data.get_type()==Variant::NIL);
 
@@ -739,8 +728,8 @@ void Control::set_drag_preview(Control *p_control) {
 
 	ERR_FAIL_NULL(p_control);
 	ERR_FAIL_COND( !((Object*)p_control)->cast_to<Control>());
-	ERR_FAIL_COND(!is_inside_scene() || !data.window);
-	ERR_FAIL_COND(p_control->is_inside_scene());
+	ERR_FAIL_COND(!is_inside_tree() || !data.window);
+	ERR_FAIL_COND(p_control->is_inside_tree());
 	ERR_FAIL_COND(p_control->get_parent()!=NULL);
 
 	if (data.window->window->drag_preview) {
@@ -951,70 +940,69 @@ void Control::_window_input_event(InputEvent p_event) {
 		case InputEvent::MOUSE_BUTTON: {
 
 
-		window->key_event_accepted=false;
+			window->key_event_accepted=false;
 
-		Point2 mpos =(get_viewport_transform()).affine_inverse().xform(Point2(p_event.mouse_button.x,p_event.mouse_button.y));
-
-		if (p_event.mouse_button.pressed) {
-
+			Point2 mpos =(get_canvas_transform()).affine_inverse().xform(Point2(p_event.mouse_button.x,p_event.mouse_button.y));
+			if (p_event.mouse_button.pressed) {
 
 
-			Size2 pos = mpos - _window_get_pos();
-			if (window->mouse_focus && p_event.mouse_button.button_index!=window->mouse_focus_button) {
 
-				//do not steal mouse focus and stuff
+				Size2 pos = mpos;
+				if (window->mouse_focus && p_event.mouse_button.button_index!=window->mouse_focus_button) {
 
-			} else {
+					//do not steal mouse focus and stuff
+
+				} else {
 
 
-				_window_sort_modal_stack();
-				while (!window->modal_stack.empty()) {
+					_window_sort_modal_stack();
+					while (!window->modal_stack.empty()) {
 
-					Control *top = window->modal_stack.back()->get();
-					if (!top->has_point(top->get_global_transform().affine_inverse().xform(pos))) {
+						Control *top = window->modal_stack.back()->get();
+						if (!top->has_point(top->get_global_transform().affine_inverse().xform(pos))) {
 
-						if (top->data.modal_exclusive) {
-							//cancel event, sorry, modal exclusive EATS UP ALL
-							get_scene()->call_group(SceneMainLoop::GROUP_CALL_REALTIME,"windows","_cancel_input_ID",p_event.ID);
-							get_scene()->set_input_as_handled();
-							return; // no one gets the event if exclusive NO ONE
+							if (top->data.modal_exclusive) {
+								//cancel event, sorry, modal exclusive EATS UP ALL
+								get_tree()->call_group(SceneTree::GROUP_CALL_REALTIME,"windows","_cancel_input_ID",p_event.ID);
+								get_tree()->set_input_as_handled();
+								return; // no one gets the event if exclusive NO ONE
+							}
+
+							top->notification(NOTIFICATION_MODAL_CLOSE);
+							top->_modal_stack_remove();
+							top->hide();
+						} else {
+							break;
 						}
+					}
 
-						top->notification(NOTIFICATION_MODAL_CLOSE);
-						top->_modal_stack_remove();
-						top->hide();
-					} else {
+
+
+					Matrix32 parent_xform;
+
+					if (data.parent_canvas_item)
+						parent_xform=data.parent_canvas_item->get_global_transform();
+
+
+
+					window->mouse_focus = _find_control_at_pos(this,pos,parent_xform,window->focus_inv_xform);
+					//print_line("has mf "+itos(window->mouse_focus!=NULL));
+					window->mouse_focus_button=p_event.mouse_button.button_index;
+
+					if (!window->mouse_focus) {
 						break;
 					}
+
+					if (p_event.mouse_button.button_index==BUTTON_LEFT) {
+						window->drag_accum=Vector2();
+						window->drag_attempted=false;
+						window->drag_data=Variant();
+					}
+
+
 				}
 
-
-
-				Matrix32 parent_xform;
-
-				if (data.parent_canvas_item)
-					parent_xform=data.parent_canvas_item->get_global_transform();
-
-
-
-				window->mouse_focus = _find_control_at_pos(this,pos,parent_xform,window->focus_inv_xform);
-				//print_line("has mf "+itos(window->mouse_focus!=NULL));
-				window->mouse_focus_button=p_event.mouse_button.button_index;
-
-				if (!window->mouse_focus) {
-					break;
-				}
-
-				if (p_event.mouse_button.button_index==BUTTON_LEFT) {
-					window->drag_accum=Vector2();
-					window->drag_attempted=false;
-					window->drag_data=Variant();
-				}
-
-
-			}
-
-			p_event.mouse_button.global_x = pos.x;
+				p_event.mouse_button.global_x = pos.x;
 				p_event.mouse_button.global_y = pos.y;
 
 				pos = window->focus_inv_xform.xform(pos);
@@ -1032,8 +1020,8 @@ void Control::_window_input_event(InputEvent p_event) {
 
 				/*if (bool(GLOBAL_DEF("debug/print_clicked_control",false))) {
 
-					print_line(String(window->mouse_focus->get_path())+" - "+pos);
-				}*/
+						print_line(String(window->mouse_focus->get_path())+" - "+pos);
+					}*/
 #endif
 
 				if (window->mouse_focus->get_focus_mode()!=FOCUS_NONE && window->mouse_focus!=window->key_focus && p_event.mouse_button.button_index==BUTTON_LEFT) {
@@ -1045,9 +1033,11 @@ void Control::_window_input_event(InputEvent p_event) {
 				if (window->mouse_focus->can_process()) {
 					_window_call_input(window->mouse_focus,p_event);
 				}
-				
-				get_scene()->call_group(SceneMainLoop::GROUP_CALL_REALTIME,"windows","_cancel_input_ID",p_event.ID);
-				get_scene()->set_input_as_handled();
+
+				get_tree()->call_group(SceneTree::GROUP_CALL_REALTIME,"windows","_cancel_input_ID",p_event.ID);
+				get_tree()->set_input_as_handled();
+
+				window->tooltip_popup->hide();
 
 			} else {
 
@@ -1060,7 +1050,7 @@ void Control::_window_input_event(InputEvent p_event) {
 
 					if (window->mouse_over && window->drag_data.get_type()!=Variant::NIL && p_event.mouse_button.button_index==BUTTON_LEFT) {
 
-						Size2 pos = mpos - _window_get_pos();
+						Size2 pos = mpos;
 						pos = window->focus_inv_xform.xform(pos);
 						window->mouse_over->drop_data(pos,window->drag_data);
 						window->drag_data=Variant();
@@ -1070,7 +1060,7 @@ void Control::_window_input_event(InputEvent p_event) {
 					break;
 				}
 
-				Size2 pos = mpos - _window_get_pos();
+				Size2 pos = mpos;
 				p_event.mouse_button.global_x = pos.x;
 				p_event.mouse_button.global_y = pos.y;
 				pos = window->focus_inv_xform.xform(pos);
@@ -1091,8 +1081,8 @@ void Control::_window_input_event(InputEvent p_event) {
 				}
 
 
-				get_scene()->call_group(SceneMainLoop::GROUP_CALL_REALTIME,"windows","_cancel_input_ID",p_event.ID);
-				get_scene()->set_input_as_handled();
+				get_tree()->call_group(SceneTree::GROUP_CALL_REALTIME,"windows","_cancel_input_ID",p_event.ID);
+				get_tree()->set_input_as_handled();
 
 			}
 		} break;
@@ -1100,8 +1090,8 @@ void Control::_window_input_event(InputEvent p_event) {
 
 			window->key_event_accepted=false;
 
-			Matrix32 localizer = (get_viewport_transform()).affine_inverse();
-			Size2 pos = localizer.xform(Size2(p_event.mouse_motion.x,p_event.mouse_motion.y)) - _window_get_pos();
+			Matrix32 localizer = (get_canvas_transform()).affine_inverse();
+			Size2 pos = localizer.xform(Size2(p_event.mouse_motion.x,p_event.mouse_motion.y));
 			Vector2 speed = localizer.basis_xform(Point2(p_event.mouse_motion.speed_x,p_event.mouse_motion.speed_y));
 			Vector2 rel = localizer.basis_xform(Point2(p_event.mouse_motion.relative_x,p_event.mouse_motion.relative_y));
 
@@ -1138,6 +1128,7 @@ void Control::_window_input_event(InputEvent p_event) {
 				over = _find_control_at_pos(this,pos,parent_xform,window->focus_inv_xform);
 			}
 
+
 			if (window->drag_data.get_type()==Variant::NIL && over && !window->modal_stack.empty()) {
 
 				Control *top = window->modal_stack.back()->get();
@@ -1159,7 +1150,7 @@ void Control::_window_input_event(InputEvent p_event) {
 			
 			window->mouse_over=over;
 
-			get_scene()->call_group(SceneMainLoop::GROUP_CALL_REALTIME,"windows","_cancel_tooltip");
+			get_tree()->call_group(SceneTree::GROUP_CALL_REALTIME,"windows","_cancel_tooltip");
 
 			if (window->drag_preview) {
 				window->drag_preview->set_pos(pos);
@@ -1215,8 +1206,8 @@ void Control::_window_input_event(InputEvent p_event) {
 
 
 			
-			get_scene()->call_group(SceneMainLoop::GROUP_CALL_REALTIME,"windows","_cancel_input_ID",p_event.ID);
-			get_scene()->set_input_as_handled();
+			get_tree()->call_group(SceneTree::GROUP_CALL_REALTIME,"windows","_cancel_input_ID",p_event.ID);
+			get_tree()->set_input_as_handled();
 
 
 			if (window->drag_data.get_type()!=Variant::NIL && p_event.mouse_motion.button_mask&BUTTON_MASK_LEFT) {
@@ -1242,7 +1233,7 @@ void Control::_window_input_event(InputEvent p_event) {
 
 				if (window->key_event_accepted) {
 
-					get_scene()->call_group(SceneMainLoop::GROUP_CALL_REALTIME,"windows","_cancel_input_ID",p_event.ID);
+					get_tree()->call_group(SceneTree::GROUP_CALL_REALTIME,"windows","_cancel_input_ID",p_event.ID);
 					break;
 				}
 			}
@@ -1302,7 +1293,7 @@ void Control::_window_input_event(InputEvent p_event) {
 
 				if (next) {
 					next->grab_focus();
-					get_scene()->call_group(SceneMainLoop::GROUP_CALL_REALTIME,"windows","_cancel_input_ID",p_event.ID);
+					get_tree()->call_group(SceneTree::GROUP_CALL_REALTIME,"windows","_cancel_input_ID",p_event.ID);
 				}
 			}
 
@@ -1317,7 +1308,7 @@ Control *Control::get_window() const {
 
 bool Control::is_window() const {
 
-	return (is_inside_scene() && window);
+	return (is_inside_tree() && window);
 }
 
 
@@ -1337,9 +1328,12 @@ Size2 Control::get_minimum_size() const {
 
 Ref<Texture> Control::get_icon(const StringName& p_name,const StringName& p_type) const {
 	
-	const Ref<Texture>* tex = data.icon_override.getptr(p_name);
-	if (tex)
-		return *tex;	
+	if (p_type==StringName()) {
+
+		const Ref<Texture>* tex = data.icon_override.getptr(p_name);
+		if (tex)
+			return *tex;
+	}
 
 	StringName type = p_type?p_type:get_type_name();
 
@@ -1365,12 +1359,11 @@ Ref<Texture> Control::get_icon(const StringName& p_name,const StringName& p_type
 
 Ref<StyleBox> Control::get_stylebox(const StringName& p_name,const StringName& p_type) const {
 		
-	
-	const Ref<StyleBox>* style = data.style_override.getptr(p_name);
-	
-	
-	if (style)
-		return *style;	
+	if (p_type==StringName()) {
+		const Ref<StyleBox>* style = data.style_override.getptr(p_name);
+		if (style)
+			return *style;
+	}
 
 	StringName type = p_type?p_type:get_type_name();
 
@@ -1393,10 +1386,12 @@ Ref<StyleBox> Control::get_stylebox(const StringName& p_name,const StringName& p
 
 }
 Ref<Font> Control::get_font(const StringName& p_name,const StringName& p_type) const {
-	
-	const Ref<Font>* font = data.font_override.getptr(p_name);
-	if (font)
-		return *font;	
+
+	if (p_type==StringName()) {
+		const Ref<Font>* font = data.font_override.getptr(p_name);
+		if (font)
+			return *font;
+	}
 
 	StringName type = p_type?p_type:get_type_name();
 
@@ -1407,6 +1402,8 @@ Ref<Font> Control::get_font(const StringName& p_name,const StringName& p_type) c
 
 		if (theme_owner->data.theme->has_font(p_name, type ) )
 			return data.theme_owner->data.theme->get_font(p_name, type );
+		if (theme_owner->data.theme->get_default_theme_font().is_valid())
+			return theme_owner->data.theme->get_default_theme_font();
 		Control *parent = theme_owner->get_parent()?theme_owner->get_parent()->cast_to<Control>():NULL;
 
 		if (parent)
@@ -1420,10 +1417,12 @@ Ref<Font> Control::get_font(const StringName& p_name,const StringName& p_type) c
 
 }
 Color Control::get_color(const StringName& p_name,const StringName& p_type) const {
-	
-	const Color* color = data.color_override.getptr(p_name);
-	if (color)
-		return *color;	
+
+	if (p_type==StringName()) {
+		const Color* color = data.color_override.getptr(p_name);
+		if (color)
+			return *color;
+	}
 
 	StringName type = p_type?p_type:get_type_name();
 	// try with custom themes
@@ -1447,10 +1446,12 @@ Color Control::get_color(const StringName& p_name,const StringName& p_type) cons
 }
 
 int Control::get_constant(const StringName& p_name,const StringName& p_type) const {
-	
-	const int* constant = data.constant_override.getptr(p_name);
-	if (constant)
-		return *constant;	
+
+	if (p_type==StringName()) {
+		const int* constant = data.constant_override.getptr(p_name);
+		if (constant)
+			return *constant;
+	}
 
 	StringName type = p_type?p_type:get_type_name();
 		// try with custom themes
@@ -1477,9 +1478,11 @@ int Control::get_constant(const StringName& p_name,const StringName& p_type) con
 
 bool Control::has_icon(const StringName& p_name,const StringName& p_type) const {
 	
-	const Ref<Texture>* tex = data.icon_override.getptr(p_name);
-	if (tex)
-		return true;	
+	if (p_type==StringName()) {
+		const Ref<Texture>* tex = data.icon_override.getptr(p_name);
+		if (tex)
+			return true;
+	}
 
 	StringName type = p_type?p_type:get_type_name();
 
@@ -1504,11 +1507,12 @@ bool Control::has_icon(const StringName& p_name,const StringName& p_type) const 
 }
 bool Control::has_stylebox(const StringName& p_name,const StringName& p_type) const {
 		
-	
-	const Ref<StyleBox>* style = data.style_override.getptr(p_name);
-		
-	if (style)
-		return true;	
+	if (p_type==StringName()) {
+		const Ref<StyleBox>* style = data.style_override.getptr(p_name);
+
+		if (style)
+			return true;
+	}
 
 	StringName type = p_type?p_type:get_type_name();
 
@@ -1533,9 +1537,11 @@ bool Control::has_stylebox(const StringName& p_name,const StringName& p_type) co
 }
 bool Control::has_font(const StringName& p_name,const StringName& p_type) const {
 	
-	const Ref<Font>* font = data.font_override.getptr(p_name);
-	if (font)
-		return true;	
+	if (p_type==StringName()) {
+		const Ref<Font>* font = data.font_override.getptr(p_name);
+		if (font)
+			return true;
+	}
 
 
 	StringName type = p_type?p_type:get_type_name();
@@ -1561,9 +1567,11 @@ bool Control::has_font(const StringName& p_name,const StringName& p_type) const 
 }
 bool Control::has_color(const StringName& p_name,const StringName& p_type) const {
 	
-	const Color* color = data.color_override.getptr(p_name);
-	if (color)
-		return true;	
+	if (p_type==StringName()) {
+		const Color* color = data.color_override.getptr(p_name);
+		if (color)
+			return true;
+	}
 
 	StringName type = p_type?p_type:get_type_name();
 
@@ -1588,10 +1596,13 @@ bool Control::has_color(const StringName& p_name,const StringName& p_type) const
 }
 
 bool Control::has_constant(const StringName& p_name,const StringName& p_type) const {
-	
-	const int* constant = data.constant_override.getptr(p_name);
-	if (constant)
-		return true;	
+
+	if (p_type==StringName()) {
+
+		const int* constant = data.constant_override.getptr(p_name);
+		if (constant)
+			return true;
+	}
 
 
 	StringName type = p_type?p_type:get_type_name();
@@ -1617,7 +1628,7 @@ bool Control::has_constant(const StringName& p_name,const StringName& p_type) co
 
 Size2 Control::get_parent_area_size() const {
 
-	ERR_FAIL_COND_V(!is_inside_scene(),Size2());
+	ERR_FAIL_COND_V(!is_inside_tree(),Size2());
 
 	Size2 parent_size;
 
@@ -1634,7 +1645,7 @@ Size2 Control::get_parent_area_size() const {
 
 void Control::_size_changed() {
 
-	if (!is_inside_scene())
+	if (!is_inside_tree())
 		return;
 
 	Size2 parent_size = get_parent_area_size();
@@ -1658,6 +1669,10 @@ void Control::_size_changed() {
 
 				margin_pos[i]=area*data.margin[i];
 			} break;
+            case ANCHOR_CENTER: {
+
+                margin_pos[i]=(area/2)-data.margin[i];
+            } break;
 		}
 	}
 
@@ -1683,7 +1698,7 @@ void Control::_size_changed() {
 
 float Control::_get_parent_range(int p_idx) const {
 	
-	if (!is_inside_scene()) {
+	if (!is_inside_tree()) {
 	
 		return 1.0;
 		
@@ -1722,6 +1737,9 @@ float Control::_s2a(float p_val, AnchorType p_anchor,float p_range) const {
 		case ANCHOR_RATIO: {
 			return p_val/p_range;
 		} break;			
+        case ANCHOR_CENTER: {
+            return (p_range/2)-p_val;
+        } break;
 	}	
 	
 	return 0;
@@ -1741,6 +1759,9 @@ float Control::_a2s(float p_val, AnchorType p_anchor,float p_range) const {
 		case ANCHOR_RATIO: {
 			return Math::floor(p_range*p_val);
 		} break;			
+		case ANCHOR_CENTER: {
+		    return Math::floor((p_range/2)-p_val);
+		} break;
 	}
 	return 0;
 }
@@ -1748,7 +1769,7 @@ float Control::_a2s(float p_val, AnchorType p_anchor,float p_range) const {
 
 void Control::set_anchor(Margin p_margin,AnchorType p_anchor) {
 	
-	if (!is_inside_scene()) {
+	if (!is_inside_tree()) {
 		
 		data.anchor[p_margin]=p_anchor;
 	} else {
@@ -1980,7 +2001,7 @@ void Control::add_constant_override(const StringName& p_name, int p_constant) {
 
 void Control::set_focus_mode(FocusMode p_focus_mode) {
 
-	if (is_inside_scene() && p_focus_mode == FOCUS_NONE && data.focus_mode!=FOCUS_NONE && has_focus())
+	if (is_inside_tree() && p_focus_mode == FOCUS_NONE && data.focus_mode!=FOCUS_NONE && has_focus())
 		release_focus();
 
 	data.focus_mode=p_focus_mode;
@@ -2178,7 +2199,7 @@ bool Control::has_focus() const {
 
 void Control::grab_focus() {
 
-	ERR_FAIL_COND(!is_inside_scene());
+	ERR_FAIL_COND(!is_inside_tree());
 	ERR_FAIL_COND(!data.window);
 	
 	if (data.focus_mode==FOCUS_NONE)
@@ -2188,7 +2209,7 @@ void Control::grab_focus() {
 	if (data.window->window->key_focus && data.window->window->key_focus==this)
 		return;
 		
-	get_scene()->call_group(SceneMainLoop::GROUP_CALL_REALTIME,"windows","_window_remove_focus");	
+	get_tree()->call_group(SceneTree::GROUP_CALL_REALTIME,"windows","_window_remove_focus");	
 	data.window->window->key_focus=this;
 	notification(NOTIFICATION_FOCUS_ENTER);
 #ifdef DEBUG_ENABLED
@@ -2202,13 +2223,13 @@ void Control::grab_focus() {
 
 void Control::release_focus() {
 
-	ERR_FAIL_COND(!is_inside_scene());
+	ERR_FAIL_COND(!is_inside_tree());
 	ERR_FAIL_COND(!data.window);
 
 	if (!has_focus())
 		return;
 
-	get_scene()->call_group(SceneMainLoop::GROUP_CALL_REALTIME,"windows","_window_remove_focus");
+	get_tree()->call_group(SceneTree::GROUP_CALL_REALTIME,"windows","_window_remove_focus");
 	//data.window->window->key_focus=this;
 	//notification(NOTIFICATION_FOCUS_ENTER);
 	update();
@@ -2217,12 +2238,12 @@ void Control::release_focus() {
 
 bool Control::is_toplevel_control() const {
 
-	return is_inside_scene() && (!data.parent_canvas_item && !window && is_set_as_toplevel());
+	return is_inside_tree() && (!data.parent_canvas_item && !window && is_set_as_toplevel());
 }
 
 void Control::show_modal(bool p_exclusive) {
 	
-	ERR_FAIL_COND(!is_inside_scene());
+	ERR_FAIL_COND(!is_inside_tree());
 	ERR_FAIL_COND(!data.SI && data.window!=this);
 	ERR_FAIL_COND(!data.window);
 
@@ -2248,7 +2269,10 @@ void Control::_window_sort_subwindows() {
 	if (!window->subwindow_order_dirty)
 		return;
 
+
 	window->modal_stack.sort_custom<CComparator>();
+	window->subwindows.sort_custom<CComparator>();
+
 	window->subwindow_order_dirty=false;
 
 }
@@ -2282,7 +2306,7 @@ void Control::_modal_stack_remove() {
 			if (!pfoc)
 				return;
 
-			if (!pfoc->is_inside_scene() || !pfoc->is_visible())
+			if (!pfoc->is_inside_tree() || !pfoc->is_visible())
 				return;
 			pfoc->grab_focus();
 		} else {
@@ -2332,13 +2356,13 @@ void Control::set_theme(const Ref<Theme>& p_theme) {
 void Control::_window_accept_event() {
 
 	window->key_event_accepted=true;
-	if (is_inside_scene())
-		get_scene()->set_input_as_handled();
+	if (is_inside_tree())
+		get_tree()->set_input_as_handled();
 
 }
 void Control::accept_event() {
 
-	if (is_inside_scene() && get_window())
+	if (is_inside_tree() && get_window())
 		get_window()->_window_accept_event();
 
 }
@@ -2585,7 +2609,7 @@ float Control::get_stretch_ratio() const {
 
 void Control::grab_click_focus() {
 
-	ERR_FAIL_COND(!is_inside_scene());
+	ERR_FAIL_COND(!is_inside_tree());
 
 	if (data.window && data.window->window->mouse_focus) {
 
@@ -2620,7 +2644,7 @@ void Control::grab_click_focus() {
 
 void Control::minimum_size_changed() {
 
-	if (!is_inside_scene())
+	if (!is_inside_tree())
 		return;
 
 	if (data.pending_min_size_update)
@@ -2663,9 +2687,15 @@ bool Control::is_stopping_mouse() const {
 
 Control *Control::get_focus_owner() const {
 
-	ERR_FAIL_COND_V(!is_inside_scene(),NULL);
-	ERR_FAIL_COND_V(!window,NULL);
-	return window->key_focus;
+	ERR_FAIL_COND_V(!is_inside_tree(),NULL);
+	ERR_FAIL_COND_V(!data.window,NULL);
+	return data.window->window->key_focus;
+}
+
+
+void Control::warp_mouse(const Point2& p_to_pos) {
+	ERR_FAIL_COND(!is_inside_tree());
+	get_viewport()->warp_mouse(get_global_transform().xform(p_to_pos));
 }
 
 void Control::_bind_methods() {
@@ -2764,16 +2794,19 @@ void Control::_bind_methods() {
 
 	ObjectTypeDB::bind_method(_MD("set_drag_preview","control:Control"),&Control::set_drag_preview);
 
+	ObjectTypeDB::bind_method(_MD("warp_mouse","to_pos"),&Control::warp_mouse);
+
+
 	BIND_VMETHOD(MethodInfo("_input_event",PropertyInfo(Variant::INPUT_EVENT,"event")));
 	BIND_VMETHOD(MethodInfo(Variant::VECTOR2,"get_minimum_size"));
 	BIND_VMETHOD(MethodInfo(Variant::OBJECT,"get_drag_data",PropertyInfo(Variant::VECTOR2,"pos")));
 	BIND_VMETHOD(MethodInfo(Variant::BOOL,"can_drop_data",PropertyInfo(Variant::VECTOR2,"pos"),PropertyInfo(Variant::NIL,"data")));
 	BIND_VMETHOD(MethodInfo("drop_data",PropertyInfo(Variant::VECTOR2,"pos"),PropertyInfo(Variant::NIL,"data")));
 
-	ADD_PROPERTYINZ( PropertyInfo(Variant::INT,"anchor/left", PROPERTY_HINT_ENUM, "Begin,End,Ratio"), _SCS("set_anchor"),_SCS("get_anchor"), MARGIN_LEFT );
-	ADD_PROPERTYINZ( PropertyInfo(Variant::INT,"anchor/top", PROPERTY_HINT_ENUM, "Begin,End,Ratio"), _SCS("set_anchor"),_SCS("get_anchor"), MARGIN_TOP );
-	ADD_PROPERTYINZ( PropertyInfo(Variant::INT,"anchor/right", PROPERTY_HINT_ENUM, "Begin,End,Ratio"), _SCS("set_anchor"),_SCS("get_anchor"), MARGIN_RIGHT );
-	ADD_PROPERTYINZ( PropertyInfo(Variant::INT,"anchor/bottom", PROPERTY_HINT_ENUM, "Begin,End,Ratio"), _SCS("set_anchor"),_SCS("get_anchor"), MARGIN_BOTTOM );
+	ADD_PROPERTYINZ( PropertyInfo(Variant::INT,"anchor/left", PROPERTY_HINT_ENUM, "Begin,End,Ratio,Center"), _SCS("set_anchor"),_SCS("get_anchor"), MARGIN_LEFT );
+	ADD_PROPERTYINZ( PropertyInfo(Variant::INT,"anchor/top", PROPERTY_HINT_ENUM, "Begin,End,Ratio,Center"), _SCS("set_anchor"),_SCS("get_anchor"), MARGIN_TOP );
+	ADD_PROPERTYINZ( PropertyInfo(Variant::INT,"anchor/right", PROPERTY_HINT_ENUM, "Begin,End,Ratio,Center"), _SCS("set_anchor"),_SCS("get_anchor"), MARGIN_RIGHT );
+	ADD_PROPERTYINZ( PropertyInfo(Variant::INT,"anchor/bottom", PROPERTY_HINT_ENUM, "Begin,End,Ratio,Center"), _SCS("set_anchor"),_SCS("get_anchor"), MARGIN_BOTTOM );
 
 	ADD_PROPERTYINZ( PropertyInfo(Variant::INT,"margin/left", PROPERTY_HINT_RANGE, "-4096,4096"), _SCS("set_margin"),_SCS("get_margin"), MARGIN_LEFT );
 	ADD_PROPERTYINZ( PropertyInfo(Variant::INT,"margin/top", PROPERTY_HINT_RANGE, "-4096,4096"), _SCS("set_margin"),_SCS("get_margin"), MARGIN_TOP );
@@ -2794,10 +2827,12 @@ void Control::_bind_methods() {
 	ADD_PROPERTYNZ( PropertyInfo(Variant::INT,"size_flags/horizontal", PROPERTY_HINT_FLAGS, "Expand,Fill"), _SCS("set_h_size_flags"),_SCS("get_h_size_flags") );
 	ADD_PROPERTYNZ( PropertyInfo(Variant::INT,"size_flags/vertical", PROPERTY_HINT_FLAGS, "Expand,Fill"), _SCS("set_v_size_flags"),_SCS("get_v_size_flags") );
 	ADD_PROPERTY( PropertyInfo(Variant::INT,"size_flags/stretch_ratio", PROPERTY_HINT_RANGE, "1,128,0.01"), _SCS("set_stretch_ratio"),_SCS("get_stretch_ratio") );
+	ADD_PROPERTYNZ( PropertyInfo(Variant::OBJECT,"theme/theme", PROPERTY_HINT_RESOURCE_TYPE, "Theme"), _SCS("set_theme"),_SCS("get_theme") );
 
 	BIND_CONSTANT( ANCHOR_BEGIN );
 	BIND_CONSTANT( ANCHOR_END );
 	BIND_CONSTANT( ANCHOR_RATIO );	
+    BIND_CONSTANT( ANCHOR_CENTER );
 	BIND_CONSTANT( FOCUS_NONE );
 	BIND_CONSTANT( FOCUS_CLICK );
 	BIND_CONSTANT( FOCUS_ALL );

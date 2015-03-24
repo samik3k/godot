@@ -130,7 +130,7 @@ void ResourceImportMetadata::_bind_methods() {
 
 	ObjectTypeDB::bind_method(_MD("set_editor","name"),&ResourceImportMetadata::set_editor);
 	ObjectTypeDB::bind_method(_MD("get_editor"),&ResourceImportMetadata::get_editor);
-	ObjectTypeDB::bind_method(_MD("add_source","path","md5"),&ResourceImportMetadata::add_source);
+	ObjectTypeDB::bind_method(_MD("add_source","path","md5"),&ResourceImportMetadata::add_source, "");
 	ObjectTypeDB::bind_method(_MD("get_source_path","idx"),&ResourceImportMetadata::get_source_path);
 	ObjectTypeDB::bind_method(_MD("get_source_md5","idx"),&ResourceImportMetadata::get_source_md5);
 	ObjectTypeDB::bind_method(_MD("remove_source","idx"),&ResourceImportMetadata::remove_source);
@@ -157,7 +157,7 @@ void Resource::_resource_path_changed() {
 
 }
 	
-void Resource::set_path(const String& p_path) {
+void Resource::set_path(const String& p_path, bool p_take_over) {
 
 	if (path_cache==p_path)
 		return;
@@ -168,7 +168,16 @@ void Resource::set_path(const String& p_path) {
 	}
 
 	path_cache="";
-	ERR_FAIL_COND( ResourceCache::resources.has( p_path ) );
+	if (ResourceCache::resources.has( p_path )) {
+		if (p_take_over) {
+
+			ResourceCache::resources.get(p_path)->set_name("");
+		} else {
+			ERR_EXPLAIN("Another resource is loaded from path: "+p_path);
+			ERR_FAIL_COND( ResourceCache::resources.has( p_path ) );
+		}
+
+	}
 	path_cache=p_path;
 	
 	if (path_cache!="") {
@@ -236,9 +245,21 @@ Ref<Resource> Resource::duplicate(bool p_subresources) {
 }
 
 
+void Resource::_set_path(const String& p_path) {
+
+	set_path(p_path,false);
+}
+
+void Resource::_take_over_path(const String& p_path) {
+
+	set_path(p_path,true);
+}
+
+
 void Resource::_bind_methods() {
 
-	ObjectTypeDB::bind_method(_MD("set_path","path"),&Resource::set_path);
+	ObjectTypeDB::bind_method(_MD("set_path","path"),&Resource::_set_path);
+	ObjectTypeDB::bind_method(_MD("take_over_path","path"),&Resource::_take_over_path);
 	ObjectTypeDB::bind_method(_MD("get_path"),&Resource::get_path);
 	ObjectTypeDB::bind_method(_MD("set_name","name"),&Resource::set_name);
 	ObjectTypeDB::bind_method(_MD("get_name"),&Resource::get_name);

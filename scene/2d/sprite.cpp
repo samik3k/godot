@@ -29,9 +29,12 @@
 #include "sprite.h"
 #include "core/core_string_names.h"
 #include "scene/scene_string_names.h"
+#include "scene/main/viewport.h"
+
 void Sprite::edit_set_pivot(const Point2& p_pivot) {
 
 	set_offset(p_pivot);
+
 }
 
 Point2 Sprite::edit_get_pivot() const {
@@ -62,20 +65,20 @@ void Sprite::_notification(int p_what) {
 			break;
 			*/
 
-			Size2i s;
-			Rect2i src_rect;
+			Size2 s;
+			Rect2 src_rect;
 
 			if (region) {
 
 				s=region_rect.size;
 				src_rect=region_rect;
 			} else {
-				s = texture->get_size();
-				s=s/Size2i(hframes,vframes);
+				s = Size2(texture->get_size());
+				s=s/Size2(hframes,vframes);
 
 				src_rect.size=s;
-				src_rect.pos.x+=(frame%hframes)*s.x;
-				src_rect.pos.y+=(frame/hframes)*s.y;
+				src_rect.pos.x+=float(frame%hframes)*s.x;
+				src_rect.pos.y+=float(frame/hframes)*s.y;
 
 			}
 
@@ -83,7 +86,7 @@ void Sprite::_notification(int p_what) {
 			if (centered)
 				ofs-=s/2;
 
-			Rect2i dst_rect(ofs,s);
+			Rect2 dst_rect(ofs,s);
 
 			if (hflip)
 				dst_rect.size.x=-dst_rect.size.x;
@@ -105,7 +108,7 @@ void Sprite::set_texture(const Ref<Texture>& p_texture) {
 	}
 	texture=p_texture;
 	if (texture.is_valid()) {
-		texture->set_flags(texture->get_flags()&(~Texture::FLAG_REPEAT)); //remove repeat from texture, it looks bad in sprites
+		texture->set_flags(texture->get_flags()); //remove repeat from texture, it looks bad in sprites
 		texture->connect(CoreStringNames::get_singleton()->changed,this,SceneStringNames::get_singleton()->update);
 	}
 	update();
@@ -134,6 +137,7 @@ void Sprite::set_offset(const Point2& p_offset) {
 	offset=p_offset;
 	update();
 	item_rect_changed();
+	_change_notify("offset");
 }
 Point2 Sprite::get_offset() const {
 
@@ -197,6 +201,8 @@ void Sprite::set_frame(int p_frame) {
 		item_rect_changed();
 
 	frame=p_frame;
+
+	emit_signal(SceneStringNames::get_singleton()->frame_changed);
 }
 
 int Sprite::get_frame() const {
@@ -305,6 +311,8 @@ void Sprite::_bind_methods() {
 	ObjectTypeDB::bind_method(_MD("set_modulate","modulate"),&Sprite::set_modulate);
 	ObjectTypeDB::bind_method(_MD("get_modulate"),&Sprite::get_modulate);
 
+	ADD_SIGNAL(MethodInfo("frame_changed"));
+
 	ADD_PROPERTY( PropertyInfo( Variant::OBJECT, "texture", PROPERTY_HINT_RESOURCE_TYPE,"Texture"), _SCS("set_texture"),_SCS("get_texture"));
 	ADD_PROPERTY( PropertyInfo( Variant::BOOL, "centered"), _SCS("set_centered"),_SCS("is_centered"));
 	ADD_PROPERTY( PropertyInfo( Variant::VECTOR2, "offset"), _SCS("set_offset"),_SCS("get_offset"));
@@ -334,4 +342,203 @@ Sprite::Sprite() {
 	modulate=Color(1,1,1,1);
 
 
+}
+
+
+
+
+//////////////////////////// VPSPRITE
+///
+///
+///
+
+
+void ViewportSprite::edit_set_pivot(const Point2& p_pivot) {
+
+	set_offset(p_pivot);
+}
+
+Point2 ViewportSprite::edit_get_pivot() const {
+
+	return get_offset();
+}
+bool ViewportSprite::edit_has_pivot() const {
+
+	return true;
+}
+
+void ViewportSprite::_notification(int p_what) {
+
+	switch(p_what) {
+
+		case NOTIFICATION_ENTER_TREE: {
+
+			if (!viewport_path.is_empty()) {
+
+				Node *n = get_node(viewport_path);
+				ERR_FAIL_COND(!n);
+				Viewport *vp=n->cast_to<Viewport>();
+				ERR_FAIL_COND(!vp);
+
+				Ref<RenderTargetTexture> rtt = vp->get_render_target_texture();
+				texture=rtt;
+				texture->connect("changed",this,"update");
+				item_rect_changed();
+			}
+		} break;
+		case NOTIFICATION_EXIT_TREE: {
+
+			if (texture.is_valid()) {
+
+				texture->disconnect("changed",this,"update");
+				texture=Ref<Texture>();
+			}
+		} break;
+		case NOTIFICATION_DRAW: {
+
+			if (texture.is_null())
+				return;
+
+			RID ci = get_canvas_item();
+
+			/*
+			texture->draw(ci,Point2());
+			break;
+			*/
+
+			Size2i s;
+			Rect2i src_rect;
+
+			s = texture->get_size();
+
+			src_rect.size=s;
+
+			Point2i ofs=offset;
+			if (centered)
+				ofs-=s/2;
+
+			Rect2i dst_rect(ofs,s);
+			texture->draw_rect_region(ci,dst_rect,src_rect,modulate);
+
+		} break;
+	}
+}
+
+void ViewportSprite::set_viewport_path(const NodePath& p_viewport) {
+
+	viewport_path=p_viewport;
+	update();
+	if (!is_inside_tree())
+		return;
+
+	if (texture.is_valid()) {
+		texture->disconnect("changed",this,"update");
+		texture=Ref<Texture>();
+	}
+
+	if (viewport_path.is_empty())
+		return;
+
+
+	Node *n = get_node(viewport_path);
+	ERR_FAIL_COND(!n);
+	Viewport *vp=n->cast_to<Viewport>();
+	ERR_FAIL_COND(!vp);
+
+	Ref<RenderTargetTexture> rtt = vp->get_render_target_texture();
+	texture=rtt;
+
+	if (texture.is_valid()) {
+		texture->connect("changed",this,"update");
+	}
+
+	item_rect_changed();
+
+}
+
+NodePath ViewportSprite::get_viewport_path() const {
+
+	return viewport_path;
+}
+
+void ViewportSprite::set_centered(bool p_center) {
+
+	centered=p_center;
+	update();
+	item_rect_changed();
+}
+
+bool ViewportSprite::is_centered() const {
+
+	return centered;
+}
+
+void ViewportSprite::set_offset(const Point2& p_offset) {
+
+	offset=p_offset;
+	update();
+	item_rect_changed();
+}
+Point2 ViewportSprite::get_offset() const {
+
+	return offset;
+}
+void ViewportSprite::set_modulate(const Color& p_color) {
+
+	modulate=p_color;
+	update();
+}
+
+Color ViewportSprite::get_modulate() const{
+
+	return modulate;
+}
+
+
+Rect2 ViewportSprite::get_item_rect() const {
+
+	if (texture.is_null())
+		return Rect2(0,0,1,1);
+	//if (texture.is_null())
+	//	return CanvasItem::get_item_rect();
+
+	Size2i s;
+
+	s = texture->get_size();
+	Point2i ofs=offset;
+	if (centered)
+		ofs-=s/2;
+
+	if (s==Size2(0,0))
+		s=Size2(1,1);
+
+	return Rect2(ofs,s);
+}
+
+
+void ViewportSprite::_bind_methods() {
+
+	ObjectTypeDB::bind_method(_MD("set_viewport_path","path"),&ViewportSprite::set_viewport_path);
+	ObjectTypeDB::bind_method(_MD("get_viewport_path"),&ViewportSprite::get_viewport_path);
+
+	ObjectTypeDB::bind_method(_MD("set_centered","centered"),&ViewportSprite::set_centered);
+	ObjectTypeDB::bind_method(_MD("is_centered"),&ViewportSprite::is_centered);
+
+	ObjectTypeDB::bind_method(_MD("set_offset","offset"),&ViewportSprite::set_offset);
+	ObjectTypeDB::bind_method(_MD("get_offset"),&ViewportSprite::get_offset);
+
+	ObjectTypeDB::bind_method(_MD("set_modulate","modulate"),&ViewportSprite::set_modulate);
+	ObjectTypeDB::bind_method(_MD("get_modulate"),&ViewportSprite::get_modulate);
+
+	ADD_PROPERTY( PropertyInfo( Variant::NODE_PATH, "viewport"), _SCS("set_viewport_path"),_SCS("get_viewport_path"));
+	ADD_PROPERTY( PropertyInfo( Variant::BOOL, "centered"), _SCS("set_centered"),_SCS("is_centered"));
+	ADD_PROPERTY( PropertyInfo( Variant::VECTOR2, "offset"), _SCS("set_offset"),_SCS("get_offset"));
+	ADD_PROPERTY( PropertyInfo( Variant::COLOR, "modulate"), _SCS("set_modulate"),_SCS("get_modulate"));
+
+}
+
+ViewportSprite::ViewportSprite() {
+
+	centered=true;
+	modulate=Color(1,1,1,1);
 }

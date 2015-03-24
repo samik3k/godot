@@ -38,12 +38,25 @@
 #include "globals.h"
 #include "thread_jandroid.h"
 #include "core/os/keyboard.h"
+#include "java_class_wrapper.h"
+
+
+static JavaClassWrapper *java_class_wrapper=NULL;
 static OS_Android *os_android=NULL;
 
 
-jvalue _variant_to_jvalue(JNIEnv *env, Variant::Type p_type, const Variant* p_arg, bool force_jobject = false) {
+struct jvalret {
 
-	jvalue v;
+	jobject obj;
+	jvalue val;
+	jvalret() { obj=NULL; }
+
+
+};
+
+jvalret _variant_to_jvalue(JNIEnv *env, Variant::Type p_type, const Variant* p_arg, bool force_jobject = false) {
+
+	jvalret v;
 
 	switch(p_type) {
 
@@ -55,9 +68,12 @@ jvalue _variant_to_jvalue(JNIEnv *env, Variant::Type p_type, const Variant* p_ar
 				jvalue val;
 				val.z = (bool)(*p_arg);
 				jobject obj = env->NewObjectA(bclass, ctor, &val);
-				v.l = obj;
+				v.val.l = obj;
+				v.obj=obj;
+				env->DeleteLocalRef(bclass);
 			} else {
-				v.z=*p_arg;
+				v.val.z=*p_arg;
+
 			};
 		} break;
 		case Variant::INT: {
@@ -69,10 +85,13 @@ jvalue _variant_to_jvalue(JNIEnv *env, Variant::Type p_type, const Variant* p_ar
 				jvalue val;
 				val.i = (int)(*p_arg);
 				jobject obj = env->NewObjectA(bclass, ctor, &val);
-				v.l = obj;
+				v.val.l = obj;
+				v.obj=obj;
+				env->DeleteLocalRef(bclass);
 
 			} else {
-				v.i=*p_arg;
+				v.val.i=*p_arg;
+
 			};
 		} break;
 		case Variant::REAL: {
@@ -84,17 +103,20 @@ jvalue _variant_to_jvalue(JNIEnv *env, Variant::Type p_type, const Variant* p_ar
 				jvalue val;
 				val.d = (double)(*p_arg);
 				jobject obj = env->NewObjectA(bclass, ctor, &val);
-				v.l = obj;
+				v.val.l = obj;
+				v.obj=obj;
+				env->DeleteLocalRef(bclass);
 
 			} else {
-				v.f=*p_arg;
+				v.val.f=*p_arg;
 			};
 		} break;
 		case Variant::STRING: {
 
 			String s = *p_arg;
 			jstring jStr = env->NewStringUTF(s.utf8().get_data());
-			v.l=jStr;
+			v.val.l=jStr;
+			v.obj=jStr;
 		} break;
 		case Variant::STRING_ARRAY: {
 
@@ -103,9 +125,12 @@ jvalue _variant_to_jvalue(JNIEnv *env, Variant::Type p_type, const Variant* p_ar
 
 			for(int j=0;j<sarray.size();j++) {
 
-				env->SetObjectArrayElement(arr,j,env->NewStringUTF( sarray[j].utf8().get_data() ));
+				jstring str = env->NewStringUTF( sarray[j].utf8().get_data() );
+				env->SetObjectArrayElement(arr,j,str);
+				env->DeleteLocalRef(str);
 			}
-			v.l=arr;
+			v.val.l=arr;
+			v.obj=arr;
 
 		} break;
 
@@ -120,27 +145,36 @@ jvalue _variant_to_jvalue(JNIEnv *env, Variant::Type p_type, const Variant* p_ar
 
 			jobjectArray jkeys = env->NewObjectArray(keys.size(), env->FindClass("java/lang/String"), env->NewStringUTF(""));
 			for (int j=0; j<keys.size(); j++) {
-				env->SetObjectArrayElement(jkeys, j, env->NewStringUTF(String(keys[j]).utf8().get_data()));
+				jstring str = env->NewStringUTF(String(keys[j]).utf8().get_data());
+				env->SetObjectArrayElement(jkeys, j, str);
+				env->DeleteLocalRef(str);
 			};
 
 			jmethodID set_keys = env->GetMethodID(dclass, "set_keys", "([Ljava/lang/String;)V");
 			jvalue val;
 			val.l = jkeys;
 			env->CallVoidMethodA(jdict, set_keys, &val);
+			env->DeleteLocalRef(jkeys);
 
 			jobjectArray jvalues = env->NewObjectArray(keys.size(), env->FindClass("java/lang/Object"), NULL);
 
 			for (int j=0; j<keys.size(); j++) {
 				Variant var = dict[keys[j]];
-				val = _variant_to_jvalue(env, var.get_type(), &var, true);
-				env->SetObjectArrayElement(jvalues, j, val.l);
+				jvalret v = _variant_to_jvalue(env, var.get_type(), &var, true);
+				env->SetObjectArrayElement(jvalues, j, v.val.l);
+				if (v.obj) {
+					env->DeleteLocalRef(v.obj);
+				}
 			};
 
 			jmethodID set_values = env->GetMethodID(dclass, "set_values", "([Ljava/lang/Object;)V");
 			val.l = jvalues;
 			env->CallVoidMethodA(jdict, set_values, &val);
+			env->DeleteLocalRef(jvalues);
+			env->DeleteLocalRef(dclass);
 
-			v.l = jdict;
+			v.val.l = jdict;
+			v.obj=jdict;
 		} break;
 
 		case Variant::INT_ARRAY: {
@@ -149,7 +183,17 @@ jvalue _variant_to_jvalue(JNIEnv *env, Variant::Type p_type, const Variant* p_ar
 			jintArray arr = env->NewIntArray(array.size());
 			DVector<int>::Read r = array.read();
 			env->SetIntArrayRegion(arr,0,array.size(),r.ptr());
-			v.l=arr;
+			v.val.l=arr;
+			v.obj=arr;
+
+		} break;
+		case Variant::RAW_ARRAY: {
+			DVector<uint8_t> array = *p_arg;
+			jbyteArray arr = env->NewByteArray(array.size());
+			DVector<uint8_t>::Read r = array.read();
+			env->SetByteArrayRegion(arr,0,array.size(),reinterpret_cast<const signed char*>(r.ptr()));
+			v.val.l=arr;
+			v.obj=arr;
 
 		} break;
 		case Variant::REAL_ARRAY: {
@@ -158,12 +202,13 @@ jvalue _variant_to_jvalue(JNIEnv *env, Variant::Type p_type, const Variant* p_ar
 			jfloatArray arr = env->NewFloatArray(array.size());
 			DVector<float>::Read r = array.read();
 			env->SetFloatArrayRegion(arr,0,array.size(),r.ptr());
-			v.l=arr;
+			v.val.l=arr;
+			v.obj=arr;
 
 		} break;
 		default: {
 
-			v.i = 0;
+			v.val.i = 0;
 		} break;
 
 	}
@@ -181,8 +226,11 @@ String _get_class_name(JNIEnv * env, jclass cls, bool* array) {
 		jboolean isarr = env->CallBooleanMethod(cls, isArray);
 		(*array) = isarr ? true : false;
 	}
+	String name = env->GetStringUTFChars( clsName, NULL );
+	env->DeleteLocalRef(clsName);
 
-	return env->GetStringUTFChars( clsName, NULL );
+	return name;
+
 };
 
 
@@ -193,6 +241,7 @@ Variant _jobject_to_variant(JNIEnv * env, jobject obj) {
 	String name = _get_class_name(env, c, &array);
 	//print_line("name is " + name + ", array "+Variant(array));
 
+	print_line("ARGNAME: "+name);
 	if (name == "java.lang.String") {
 
 		return String::utf8(env->GetStringUTFChars( (jstring)obj, NULL ));
@@ -210,6 +259,8 @@ Variant _jobject_to_variant(JNIEnv * env, jobject obj) {
 			jstring string = (jstring) env->GetObjectArrayElement(arr, i);
 			const char *rawString = env->GetStringUTFChars(string, 0);
 			sarr.push_back(String(rawString));
+			env->DeleteLocalRef(string);
+
 		}
 
 		return sarr;
@@ -240,6 +291,19 @@ Variant _jobject_to_variant(JNIEnv * env, jobject obj) {
 		DVector<int>::Write w = sarr.write();
 		env->GetIntArrayRegion(arr,0,fCount,w.ptr());
 		w = DVector<int>::Write();
+		return sarr;
+	};
+
+	if (name == "[B") {
+
+		jbyteArray arr = (jbyteArray)obj;
+		int fCount = env->GetArrayLength(arr);
+		DVector<uint8_t> sarr;
+		sarr.resize(fCount);
+
+		DVector<uint8_t>::Write w = sarr.write();
+		env->GetByteArrayRegion(arr,0,fCount,reinterpret_cast<signed char*>(w.ptr()));
+		w = DVector<uint8_t>::Write();
 		return sarr;
 	};
 
@@ -295,30 +359,34 @@ Variant _jobject_to_variant(JNIEnv * env, jobject obj) {
 
 		jobjectArray arr = (jobjectArray)obj;
 		int objCount = env->GetArrayLength(arr);
-		Array varr;
+		Array varr(true);
 
 		for (int i=0; i<objCount; i++) {
 			jobject jobj = env->GetObjectArrayElement(arr, i);
 			Variant v = _jobject_to_variant(env, jobj);
 			varr.push_back(v);
+			env->DeleteLocalRef(jobj);
+
 		}
 
 		return varr;
 	};
 
-	if (name == "com.android.godot.Dictionary") {
+    if (name == "java.util.HashMap" || name == "com.android.godot.Dictionary") {
 
-		Dictionary ret;
+		Dictionary ret(true);
 		jclass oclass = c;
 		jmethodID get_keys = env->GetMethodID(oclass, "get_keys", "()[Ljava/lang/String;");
 		jobjectArray arr = (jobjectArray)env->CallObjectMethod(obj, get_keys);
 
 		StringArray keys = _jobject_to_variant(env, arr);
+		env->DeleteLocalRef(arr);
 
 		jmethodID get_values = env->GetMethodID(oclass, "get_values", "()[Ljava/lang/Object;");
 		arr = (jobjectArray)env->CallObjectMethod(obj, get_values);
 
 		Array vals = _jobject_to_variant(env, arr);
+		env->DeleteLocalRef(arr);
 
 		//print_line("adding " + String::num(keys.size()) + " to Dictionary!");
 		for (int i=0; i<keys.size(); i++) {
@@ -326,8 +394,11 @@ Variant _jobject_to_variant(JNIEnv * env, jobject obj) {
 			ret[keys[i]] = vals[i];
 		};
 
+
 		return ret;
 	};
+
+	env->DeleteLocalRef(c);
 
 	return Variant();
 };
@@ -353,6 +424,7 @@ public:
 	virtual Variant call(const StringName& p_method,const Variant** p_args,int p_argcount,Variant::CallError &r_error) {
 
 		//print_line("attempt to call "+String(p_method));
+		ERR_FAIL_COND_V(!instance,Variant());
 
 		r_error.error=Variant::CallError::CALL_OK;
 
@@ -405,9 +477,13 @@ public:
 		JNIEnv *env = ThreadAndroid::get_env();
 
 		//print_line("argcount "+String::num(p_argcount));
+		List<jobject> to_erase;
 		for(int i=0;i<p_argcount;i++) {
 
-			v[i] = _variant_to_jvalue(env, E->get().argtypes[i], p_args[i]);
+			jvalret vr = _variant_to_jvalue(env, E->get().argtypes[i], p_args[i]);
+			v[i] = vr.val;
+			if (vr.obj)
+				to_erase.push_back(vr.obj);
 		}
 
 		//print_line("calling method!!");
@@ -439,7 +515,9 @@ public:
 			case Variant::STRING: {
 
 				jobject o = env->CallObjectMethodA(instance,E->get().method,v);
-				String singname = env->GetStringUTFChars((jstring)o, NULL );
+				String str = env->GetStringUTFChars((jstring)o, NULL );
+				ret=str;
+				env->DeleteLocalRef(o);
 			} break;
 			case Variant::STRING_ARRAY: {
 
@@ -447,6 +525,7 @@ public:
 
 				ret = _jobject_to_variant(env, arr);
 
+				env->DeleteLocalRef(arr);
 			} break;
 			case Variant::INT_ARRAY: {
 
@@ -460,6 +539,7 @@ public:
 				env->GetIntArrayRegion(arr,0,fCount,w.ptr());
 				w = DVector<int>::Write();
 				ret=sarr;
+				env->DeleteLocalRef(arr);
 			} break;
 			case Variant::REAL_ARRAY: {
 
@@ -473,6 +553,7 @@ public:
 				env->GetFloatArrayRegion(arr,0,fCount,w.ptr());
 				w = DVector<float>::Write();
 				ret=sarr;
+				env->DeleteLocalRef(arr);
 			} break;
 
 			case Variant::DICTIONARY: {
@@ -480,6 +561,7 @@ public:
 				//print_line("call dictionary");
 				jobject obj = env->CallObjectMethodA(instance, E->get().method, v);
 				ret = _jobject_to_variant(env, obj);
+				env->DeleteLocalRef(obj);
 
 			} break;
 			default: {
@@ -490,6 +572,10 @@ public:
 			} break;
 		}
 
+		while (to_erase.size()) {
+			env->DeleteLocalRef(to_erase.front()->get());
+			to_erase.pop_front();
+		}
 		//print_line("success");
 
 		return ret;
@@ -517,7 +603,10 @@ public:
 	}
 
 
-	JNISingleton() {}
+	JNISingleton() {
+		instance=NULL;
+
+	}
 
 };
 
@@ -554,6 +643,8 @@ static Vector3 accelerometer;
 static HashMap<String,JNISingleton*> jni_singletons;
 static jobject godot_io;
 
+static Vector<int> joy_device_ids;
+
 typedef void (*GFXInitFunc)(void *ud,bool gl2);
 
 static jmethodID _on_video_init=0;
@@ -567,6 +658,11 @@ static jmethodID _showKeyboard=0;
 static jmethodID _hideKeyboard=0;
 static jmethodID _setScreenOrientation=0;
 static jmethodID _getUniqueID=0;
+static jmethodID _getSystemDir=0;
+static jmethodID _playVideo=0;
+static jmethodID _isVideoPlaying=0;
+static jmethodID _pauseVideo=0;
+static jmethodID _stopVideo=0;
 
 
 static void _gfx_init_func(void* ud, bool gl2) {
@@ -622,23 +718,57 @@ static void _set_screen_orient(int p_orient) {
 	env->CallVoidMethod(godot_io, _setScreenOrientation, p_orient );
 };
 
+static String _get_system_dir(int p_dir) {
+
+	JNIEnv *env = ThreadAndroid::get_env();
+	jstring s =(jstring)env->CallObjectMethod(godot_io,_getSystemDir,p_dir);
+	return String(env->GetStringUTFChars( s, NULL ));
+};
+
+
 static void _hide_vk() {
 
 	JNIEnv* env = ThreadAndroid::get_env();
 	env->CallVoidMethod(godot_io, _hideKeyboard);
 };
 
-JNIEXPORT void JNICALL Java_com_android_godot_GodotLib_initialize(JNIEnv * env, jobject obj, jobject activity,jboolean p_need_reload_hook) {
+// virtual Error native_video_play(String p_path);
+// virtual bool native_video_is_playing();
+// virtual void native_video_pause();
+// virtual void native_video_stop();
+
+static void _play_video(const String& p_path) {
+
+}
+
+static bool _is_video_playing() {
+	JNIEnv* env = ThreadAndroid::get_env();
+	return env->CallBooleanMethod(godot_io, _isVideoPlaying);
+	//return false;
+}
+
+static void _pause_video() {
+	JNIEnv* env = ThreadAndroid::get_env();
+	env->CallVoidMethod(godot_io, _pauseVideo);
+}
+
+static void _stop_video() {
+	JNIEnv* env = ThreadAndroid::get_env();
+	env->CallVoidMethod(godot_io, _stopVideo);
+}
+
+JNIEXPORT void JNICALL Java_com_android_godot_GodotLib_initialize(JNIEnv * env, jobject obj, jobject activity,jboolean p_need_reload_hook, jobjectArray p_cmdline) {
 
 	__android_log_print(ANDROID_LOG_INFO,"godot","**INIT EVENT! - %p\n",env);
 
 
 	initialized=true;
-	_godot_instance=activity;
 
 	JavaVM *jvm;
 	env->GetJavaVM(&jvm);
 
+	_godot_instance=env->NewGlobalRef(activity);
+//	_godot_instance=activity;
 
 	__android_log_print(ANDROID_LOG_INFO,"godot","***************** HELLO FROM JNI!!!!!!!!");
 
@@ -675,6 +805,11 @@ JNIEXPORT void JNICALL Java_com_android_godot_GodotLib_initialize(JNIEnv * env, 
 			_showKeyboard = env->GetMethodID(c,"showKeyboard","(Ljava/lang/String;)V");
 			_hideKeyboard = env->GetMethodID(c,"hideKeyboard","()V");
 			_setScreenOrientation = env->GetMethodID(c,"setScreenOrientation","(I)V");
+			_getSystemDir = env->GetMethodID(c,"getSystemDir","(I)Ljava/lang/String;");
+			_playVideo = env->GetMethodID(c,"playVideo","(Ljava/lang/String;)V");
+			_isVideoPlaying = env->GetMethodID(c,"isVideoPlaying","()Z");
+			_pauseVideo = env->GetMethodID(c,"pauseVideo","()V");
+			_stopVideo = env->GetMethodID(c,"stopVideo","()V");
 		}
 
 		ThreadAndroid::make_default(jvm);
@@ -684,9 +819,37 @@ JNIEXPORT void JNICALL Java_com_android_godot_GodotLib_initialize(JNIEnv * env, 
 	}
 
 
+	const char ** cmdline=NULL;
+	int cmdlen=0;
+	bool use_apk_expansion=false;
+	if (p_cmdline) {
+		cmdlen = env->GetArrayLength(p_cmdline);
+		if (cmdlen) {
+			cmdline = (const char**)malloc((env->GetArrayLength(p_cmdline)+1)*sizeof(const char*));
+			cmdline[cmdlen]=NULL;
 
-    os_android = new OS_Android(_gfx_init_func,env,_open_uri,_get_data_dir,_get_locale, _get_model,_show_vk, _hide_vk,_set_screen_orient,_get_unique_id);
-    os_android->set_need_reload_hooks(p_need_reload_hook);
+			for (int i=0; i<cmdlen; i++) {
+
+				jstring string = (jstring) env->GetObjectArrayElement(p_cmdline, i);
+				const char *rawString = env->GetStringUTFChars(string, 0);
+				if (!rawString) {
+					__android_log_print(ANDROID_LOG_INFO,"godot","cmdline arg %i is null\n",i);
+				} else {
+		//			__android_log_print(ANDROID_LOG_INFO,"godot","cmdline arg %i is: %s\n",i,rawString);
+
+					if (strcmp(rawString,"-main_pack")==0)
+						use_apk_expansion=true;
+				}
+
+				cmdline[i]=rawString;
+			}
+		}
+	}
+
+	__android_log_print(ANDROID_LOG_INFO,"godot","CMDLINE LEN %i - APK EXPANSION %I\n",cmdlen,int(use_apk_expansion));
+
+	os_android = new OS_Android(_gfx_init_func,env,_open_uri,_get_data_dir,_get_locale, _get_model,_show_vk, _hide_vk,_set_screen_orient,_get_unique_id, _get_system_dir, _play_video,_is_video_playing, _pause_video, _stop_video,use_apk_expansion);
+	os_android->set_need_reload_hooks(p_need_reload_hook);
 
 	char wd[500];
 	getcwd(wd,500);
@@ -702,7 +865,7 @@ JNIEXPORT void JNICALL Java_com_android_godot_GodotLib_initialize(JNIEnv * env, 
 	__android_log_print(ANDROID_LOG_INFO,"godot","pre asdasd setup...");
 	Error err  = Main::setup("apk",2,args,false);
 #else
-	Error err  = Main::setup("apk",0,NULL,false);
+	Error err  = Main::setup("apk",cmdlen,(char**)cmdline,false);
 #endif
 
 	if (err!=OK) {
@@ -717,10 +880,7 @@ JNIEXPORT void JNICALL Java_com_android_godot_GodotLib_initialize(JNIEnv * env, 
 	String vd = Globals::get_singleton()->get("display/driver");
 
 
-	if (vd.to_upper()=="GLES1")
-		env->CallVoidMethod(_godot_instance, _on_video_init, (jboolean)false);
-	else
-		env->CallVoidMethod(_godot_instance, _on_video_init, (jboolean)true);
+	env->CallVoidMethod(_godot_instance, _on_video_init, (jboolean)true);
 
 	__android_log_print(ANDROID_LOG_INFO,"godot","**START");
 
@@ -760,6 +920,7 @@ JNIEXPORT void JNICALL Java_com_android_godot_GodotLib_quit(JNIEnv * env, jobjec
 
 	input_mutex->lock();
 	quit_request=true;
+	print_line("BACK PRESSED");
 	input_mutex->unlock();
 
 }
@@ -769,6 +930,7 @@ static void _initialize_java_modules() {
 
 	String modules = Globals::get_singleton()->get("android/modules");
 	Vector<String> mods = modules.split(",",false);
+    print_line("ANDROID MODULES : " + modules);
 	__android_log_print(ANDROID_LOG_INFO,"godot","mod count: %i",mods.size());
 
 	if (mods.size()) {
@@ -780,8 +942,10 @@ static void _initialize_java_modules() {
 		jmethodID getClassLoader = env->GetMethodID(activityClass,"getClassLoader", "()Ljava/lang/ClassLoader;");
 
 		jobject cls = env->CallObjectMethod(_godot_instance, getClassLoader);
+		//cls=env->NewGlobalRef(cls);
 
 		jclass classLoader = env->FindClass("java/lang/ClassLoader");
+		//classLoader=(jclass)env->NewGlobalRef(classLoader);
 
 		jmethodID findClass = env->GetMethodID(classLoader, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
 
@@ -799,10 +963,17 @@ static void _initialize_java_modules() {
 				ERR_EXPLAIN("Couldn't find singleton for class: "+m);
 				ERR_CONTINUE(!singletonClass);
 			}
+			//singletonClass=(jclass)env->NewGlobalRef(singletonClass);
 
 			__android_log_print(ANDROID_LOG_INFO,"godot","****^*^*?^*^*class data %x",singletonClass);
 			jmethodID initialize = env->GetStaticMethodID(singletonClass, "initialize", "(Landroid/app/Activity;)Lcom/android/godot/Godot$SingletonBase;");
 
+			if (!initialize) {
+
+				ERR_EXPLAIN("Couldn't find proper initialize function 'public static Godot.SingletonBase Class::initialize(Activity p_activity)' initializer for singleton class: "+m);
+				ERR_CONTINUE(!initialize);
+
+			}
 			jobject obj = env->CallStaticObjectMethod(singletonClass,initialize,_godot_instance);
 			__android_log_print(ANDROID_LOG_INFO,"godot","****^*^*?^*^*class instance %x",obj);
 			jobject gob = env->NewGlobalRef(obj);
@@ -831,6 +1002,8 @@ JNIEXPORT void JNICALL Java_com_android_godot_GodotLib_step(JNIEnv * env, jobjec
 		// ugly hack to initialize the rest of the engine
 		// because of the way android forces you to do everything with threads
 
+		java_class_wrapper = memnew( JavaClassWrapper(_godot_instance ));
+		Globals::get_singleton()->add_singleton(Globals::Singleton("JavaClassWrapper",java_class_wrapper));
 		_initialize_java_modules();
 
 		Main::setup2();
@@ -924,22 +1097,336 @@ JNIEXPORT void JNICALL Java_com_android_godot_GodotLib_touch(JNIEnv * env, jobje
 
 }
 
-JNIEXPORT void JNICALL Java_com_android_godot_GodotLib_key(JNIEnv * env, jobject obj, jint ev, jint p_unicode_char, jboolean p_pressed) {
+/*
+ * Android Key codes.
+ */
+enum {
+    AKEYCODE_UNKNOWN         = 0,
+    AKEYCODE_SOFT_LEFT       = 1,
+    AKEYCODE_SOFT_RIGHT      = 2,
+    AKEYCODE_HOME            = 3,
+    AKEYCODE_BACK            = 4,
+    AKEYCODE_CALL            = 5,
+    AKEYCODE_ENDCALL         = 6,
+    AKEYCODE_0               = 7,
+    AKEYCODE_1               = 8,
+    AKEYCODE_2               = 9,
+    AKEYCODE_3               = 10,
+    AKEYCODE_4               = 11,
+    AKEYCODE_5               = 12,
+    AKEYCODE_6               = 13,
+    AKEYCODE_7               = 14,
+    AKEYCODE_8               = 15,
+    AKEYCODE_9               = 16,
+    AKEYCODE_STAR            = 17,
+    AKEYCODE_POUND           = 18,
+    AKEYCODE_DPAD_UP         = 19,
+    AKEYCODE_DPAD_DOWN       = 20,
+    AKEYCODE_DPAD_LEFT       = 21,
+    AKEYCODE_DPAD_RIGHT      = 22,
+    AKEYCODE_DPAD_CENTER     = 23,
+    AKEYCODE_VOLUME_UP       = 24,
+    AKEYCODE_VOLUME_DOWN     = 25,
+    AKEYCODE_POWER           = 26,
+    AKEYCODE_CAMERA          = 27,
+    AKEYCODE_CLEAR           = 28,
+    AKEYCODE_A               = 29,
+    AKEYCODE_B               = 30,
+    AKEYCODE_C               = 31,
+    AKEYCODE_D               = 32,
+    AKEYCODE_E               = 33,
+    AKEYCODE_F               = 34,
+    AKEYCODE_G               = 35,
+    AKEYCODE_H               = 36,
+    AKEYCODE_I               = 37,
+    AKEYCODE_J               = 38,
+    AKEYCODE_K               = 39,
+    AKEYCODE_L               = 40,
+    AKEYCODE_M               = 41,
+    AKEYCODE_N               = 42,
+    AKEYCODE_O               = 43,
+    AKEYCODE_P               = 44,
+    AKEYCODE_Q               = 45,
+    AKEYCODE_R               = 46,
+    AKEYCODE_S               = 47,
+    AKEYCODE_T               = 48,
+    AKEYCODE_U               = 49,
+    AKEYCODE_V               = 50,
+    AKEYCODE_W               = 51,
+    AKEYCODE_X               = 52,
+    AKEYCODE_Y               = 53,
+    AKEYCODE_Z               = 54,
+    AKEYCODE_COMMA           = 55,
+    AKEYCODE_PERIOD          = 56,
+    AKEYCODE_ALT_LEFT        = 57,
+    AKEYCODE_ALT_RIGHT       = 58,
+    AKEYCODE_SHIFT_LEFT      = 59,
+    AKEYCODE_SHIFT_RIGHT     = 60,
+    AKEYCODE_TAB             = 61,
+    AKEYCODE_SPACE           = 62,
+    AKEYCODE_SYM             = 63,
+    AKEYCODE_EXPLORER        = 64,
+    AKEYCODE_ENVELOPE        = 65,
+    AKEYCODE_ENTER           = 66,
+    AKEYCODE_DEL             = 67,
+    AKEYCODE_GRAVE           = 68,
+    AKEYCODE_MINUS           = 69,
+    AKEYCODE_EQUALS          = 70,
+    AKEYCODE_LEFT_BRACKET    = 71,
+    AKEYCODE_RIGHT_BRACKET   = 72,
+    AKEYCODE_BACKSLASH       = 73,
+    AKEYCODE_SEMICOLON       = 74,
+    AKEYCODE_APOSTROPHE      = 75,
+    AKEYCODE_SLASH           = 76,
+    AKEYCODE_AT              = 77,
+    AKEYCODE_NUM             = 78,
+    AKEYCODE_HEADSETHOOK     = 79,
+    AKEYCODE_FOCUS           = 80,   // *Camera* focus
+    AKEYCODE_PLUS            = 81,
+    AKEYCODE_MENU            = 82,
+    AKEYCODE_NOTIFICATION    = 83,
+    AKEYCODE_SEARCH          = 84,
+    AKEYCODE_MEDIA_PLAY_PAUSE= 85,
+    AKEYCODE_MEDIA_STOP      = 86,
+    AKEYCODE_MEDIA_NEXT      = 87,
+    AKEYCODE_MEDIA_PREVIOUS  = 88,
+    AKEYCODE_MEDIA_REWIND    = 89,
+    AKEYCODE_MEDIA_FAST_FORWARD = 90,
+    AKEYCODE_MUTE            = 91,
+    AKEYCODE_PAGE_UP         = 92,
+    AKEYCODE_PAGE_DOWN       = 93,
+    AKEYCODE_PICTSYMBOLS     = 94,
+    AKEYCODE_SWITCH_CHARSET  = 95,
+    AKEYCODE_BUTTON_A        = 96,
+    AKEYCODE_BUTTON_B        = 97,
+    AKEYCODE_BUTTON_C        = 98,
+    AKEYCODE_BUTTON_X        = 99,
+    AKEYCODE_BUTTON_Y        = 100,
+    AKEYCODE_BUTTON_Z        = 101,
+    AKEYCODE_BUTTON_L1       = 102,
+    AKEYCODE_BUTTON_R1       = 103,
+    AKEYCODE_BUTTON_L2       = 104,
+    AKEYCODE_BUTTON_R2       = 105,
+    AKEYCODE_BUTTON_THUMBL   = 106,
+    AKEYCODE_BUTTON_THUMBR   = 107,
+    AKEYCODE_BUTTON_START    = 108,
+    AKEYCODE_BUTTON_SELECT   = 109,
+    AKEYCODE_BUTTON_MODE     = 110,
+
+    // NOTE: If you add a new keycode here you must also add it to several other files.
+    //       Refer to frameworks/base/core/java/android/view/KeyEvent.java for the full list.
+};
+
+struct _WinTranslatePair {
+
+	unsigned int keysym;
+	unsigned int keycode;
+};
+
+
+static _WinTranslatePair _ak_to_keycode[]={
+{ KEY_TAB,				AKEYCODE_TAB },
+{ KEY_ENTER,			AKEYCODE_ENTER },
+{ KEY_SHIFT,			AKEYCODE_SHIFT_LEFT },
+{ KEY_SHIFT,			AKEYCODE_SHIFT_RIGHT },
+{ KEY_ALT,				AKEYCODE_ALT_LEFT },
+{ KEY_ALT,				AKEYCODE_ALT_RIGHT },
+{ KEY_MENU,				AKEYCODE_MENU },
+{ KEY_PAUSE,			AKEYCODE_MEDIA_PLAY_PAUSE },
+{ KEY_ESCAPE,			AKEYCODE_BACK },
+{ KEY_SPACE,			AKEYCODE_SPACE },
+{ KEY_PAGEUP,			AKEYCODE_PAGE_UP },
+{ KEY_PAGEDOWN,			AKEYCODE_PAGE_DOWN },
+{ KEY_HOME,				AKEYCODE_HOME },//(0x24)
+{ KEY_LEFT,				AKEYCODE_DPAD_LEFT },
+{ KEY_UP,				AKEYCODE_DPAD_UP },
+{ KEY_RIGHT,			AKEYCODE_DPAD_RIGHT },
+{ KEY_DOWN,				AKEYCODE_DPAD_DOWN},
+{ KEY_PERIODCENTERED,	AKEYCODE_DPAD_CENTER },
+{ KEY_BACKSPACE,		AKEYCODE_DEL},
+{ KEY_0,				AKEYCODE_0 },////0 key
+{ KEY_1,				AKEYCODE_1 },////1 key
+{ KEY_2,				AKEYCODE_2 },////2 key
+{ KEY_3,				AKEYCODE_3 },////3 key
+{ KEY_4,				AKEYCODE_4 },////4 key
+{ KEY_5,				AKEYCODE_5 },////5 key
+{ KEY_6,				AKEYCODE_6 },////6 key
+{ KEY_7,				AKEYCODE_7 },////7 key
+{ KEY_8,				AKEYCODE_8 },////8 key
+{ KEY_9,				AKEYCODE_9 },////9 key
+{ KEY_A,				AKEYCODE_A },////A key
+{ KEY_B,				AKEYCODE_B },////B key
+{ KEY_C,				AKEYCODE_C },////C key
+{ KEY_D,				AKEYCODE_D },////D key
+{ KEY_E,				AKEYCODE_E },////E key
+{ KEY_F,				AKEYCODE_F },////F key
+{ KEY_G,				AKEYCODE_G },////G key
+{ KEY_H,				AKEYCODE_H },////H key
+{ KEY_I,				AKEYCODE_I },////I key
+{ KEY_J,				AKEYCODE_J },////J key
+{ KEY_K,				AKEYCODE_K },////K key
+{ KEY_L,				AKEYCODE_L },////L key
+{ KEY_M,				AKEYCODE_M },////M key
+{ KEY_N,				AKEYCODE_N },////N key
+{ KEY_O,				AKEYCODE_O },////O key
+{ KEY_P,				AKEYCODE_P },////P key
+{ KEY_Q,				AKEYCODE_Q },////Q key
+{ KEY_R,				AKEYCODE_R },////R key
+{ KEY_S,				AKEYCODE_S },////S key
+{ KEY_T,				AKEYCODE_T },////T key
+{ KEY_U,				AKEYCODE_U },////U key
+{ KEY_V,				AKEYCODE_V },////V key
+{ KEY_W,				AKEYCODE_W },////W key
+{ KEY_X,				AKEYCODE_X },////X key
+{ KEY_Y,				AKEYCODE_Y },////Y key
+{ KEY_Z,				AKEYCODE_Z },////Z key
+{ KEY_HOMEPAGE,			AKEYCODE_EXPLORER},
+{ KEY_LAUNCH0,			AKEYCODE_BUTTON_A},
+{ KEY_LAUNCH1,			AKEYCODE_BUTTON_B},
+{ KEY_LAUNCH2,			AKEYCODE_BUTTON_C},
+{ KEY_LAUNCH3,			AKEYCODE_BUTTON_X},
+{ KEY_LAUNCH4,			AKEYCODE_BUTTON_Y},
+{ KEY_LAUNCH5,			AKEYCODE_BUTTON_Z},
+{ KEY_LAUNCH6,			AKEYCODE_BUTTON_L1},
+{ KEY_LAUNCH7,			AKEYCODE_BUTTON_R1},
+{ KEY_LAUNCH8,			AKEYCODE_BUTTON_L2},
+{ KEY_LAUNCH9,			AKEYCODE_BUTTON_R2},
+{ KEY_LAUNCHA,			AKEYCODE_BUTTON_THUMBL},
+{ KEY_LAUNCHB,			AKEYCODE_BUTTON_THUMBR},
+{ KEY_LAUNCHC,			AKEYCODE_BUTTON_START},
+{ KEY_LAUNCHD,			AKEYCODE_BUTTON_SELECT},
+{ KEY_LAUNCHE,			AKEYCODE_BUTTON_MODE},
+{ KEY_VOLUMEMUTE,		AKEYCODE_MUTE},
+{ KEY_VOLUMEDOWN,		AKEYCODE_VOLUME_DOWN},
+{ KEY_VOLUMEUP,			AKEYCODE_VOLUME_UP},
+{ KEY_BACK,				AKEYCODE_MEDIA_REWIND },
+{ KEY_FORWARD,			AKEYCODE_MEDIA_FAST_FORWARD },
+{ KEY_MEDIANEXT,		AKEYCODE_MEDIA_NEXT },
+{ KEY_MEDIAPREVIOUS,	AKEYCODE_MEDIA_PREVIOUS },
+{ KEY_MEDIASTOP,		AKEYCODE_MEDIA_STOP },
+{ KEY_PLUS,				AKEYCODE_PLUS },
+{ KEY_EQUAL,			AKEYCODE_EQUALS},// the '+' key
+{ KEY_COMMA,			AKEYCODE_COMMA},// the ',' key
+{ KEY_MINUS,			AKEYCODE_MINUS},// the '-' key
+{ KEY_SLASH,			AKEYCODE_SLASH},// the '/?' key
+{ KEY_BACKSLASH,		AKEYCODE_BACKSLASH},
+{ KEY_BRACKETLEFT,		AKEYCODE_LEFT_BRACKET},
+{ KEY_BRACKETRIGHT,		AKEYCODE_RIGHT_BRACKET},
+{ KEY_UNKNOWN,			0} };
+/*
+TODO: map these android key:
+    AKEYCODE_SOFT_LEFT       = 1,
+    AKEYCODE_SOFT_RIGHT      = 2,
+    AKEYCODE_CALL            = 5,
+    AKEYCODE_ENDCALL         = 6,
+    AKEYCODE_STAR            = 17,
+    AKEYCODE_POUND           = 18,
+    AKEYCODE_POWER           = 26,
+    AKEYCODE_CAMERA          = 27,
+    AKEYCODE_CLEAR           = 28,
+    AKEYCODE_SYM             = 63,
+    AKEYCODE_ENVELOPE        = 65,
+    AKEYCODE_GRAVE           = 68,
+    AKEYCODE_SEMICOLON       = 74,
+    AKEYCODE_APOSTROPHE      = 75,
+    AKEYCODE_AT              = 77,
+    AKEYCODE_NUM             = 78,
+    AKEYCODE_HEADSETHOOK     = 79,
+    AKEYCODE_FOCUS           = 80,   // *Camera* focus
+    AKEYCODE_NOTIFICATION    = 83,
+    AKEYCODE_SEARCH          = 84,
+    AKEYCODE_PICTSYMBOLS     = 94,
+    AKEYCODE_SWITCH_CHARSET  = 95,
+*/
+
+static unsigned int android_get_keysym(unsigned int p_code) {
+	for(int i=0;_ak_to_keycode[i].keysym!=KEY_UNKNOWN;i++) {
+
+		if (_ak_to_keycode[i].keycode==p_code) {
+			//print_line("outcode: " + _ak_to_keycode[i].keysym);
+
+			return _ak_to_keycode[i].keysym;
+		}
+	}
+
+
+	return KEY_UNKNOWN;
+}
+
+static int find_device(int p_device) {
+
+	for (int i=0; i<joy_device_ids.size(); i++) {
+
+		if (joy_device_ids[i] == p_device) {
+			//print_line("found device at "+String::num(i));
+			return i;
+		};
+	};
+
+	//print_line("adding a device at" + String::num(joy_device_ids.size()));
+	joy_device_ids.push_back(p_device);
+
+	return joy_device_ids.size() - 1;
+};
+
+JNIEXPORT void JNICALL Java_com_android_godot_GodotLib_joybutton(JNIEnv * env, jobject obj, jint p_device, jint p_button, jboolean p_pressed) {
+
+	InputEvent ievent;
+	ievent.type = InputEvent::JOYSTICK_BUTTON;
+	ievent.device = find_device(p_device);
+	ievent.joy_button.button_index = p_button;
+	ievent.joy_button.pressed = p_pressed;
+
+	input_mutex->lock();
+	key_events.push_back(ievent);
+	input_mutex->unlock();
+};
+
+JNIEXPORT void JNICALL Java_com_android_godot_GodotLib_joyaxis(JNIEnv * env, jobject obj, jint p_device, jint p_axis, jfloat p_value) {
+
+	InputEvent ievent;
+	ievent.type = InputEvent::JOYSTICK_MOTION;
+	ievent.device = find_device(p_device);
+	ievent.joy_motion.axis = p_axis;
+	ievent.joy_motion.axis_value = p_value;
+
+	input_mutex->lock();
+	key_events.push_back(ievent);
+	input_mutex->unlock();
+};
+
+
+JNIEXPORT void JNICALL Java_com_android_godot_GodotLib_key(JNIEnv * env, jobject obj, jint p_scancode, jint p_unicode_char, jboolean p_pressed) {
 
 	InputEvent ievent;
 	ievent.type = InputEvent::KEY;
 	ievent.device = 0;
 	int val = p_unicode_char;
-	ievent.key.scancode = val;
+	int scancode = android_get_keysym(p_scancode);
+	ievent.key.scancode = scancode;
 	ievent.key.unicode = val;
-	if (val == 61448) {
+	ievent.key.pressed = p_pressed;
+
+	print_line("Scancode: " + String::num(p_scancode) + ":" + String::num(ievent.key.scancode) + " Unicode: " + String::num(val));
+
+	ievent.key.mod.shift=false;
+	ievent.key.mod.alt=false;
+	ievent.key.mod.control=false;
+	ievent.key.echo=false;
+
+    if (val == '\n')
+    {
+		ievent.key.scancode = KEY_ENTER;
+    }else if (val == 61448) {
 		ievent.key.scancode = KEY_BACKSPACE;
 		ievent.key.unicode = KEY_BACKSPACE;
-	};
-	if (val == 61453) {
+	} else if (val == 61453) {
 		ievent.key.scancode = KEY_ENTER;
 		ievent.key.unicode = KEY_ENTER;
-	};
+	} else if (p_scancode==4) {
+
+	    quit_request=true;
+    }
 
 	input_mutex->lock();
 	key_events.push_back(ievent);
@@ -1017,6 +1504,7 @@ static Variant::Type get_jni_type(const String& p_type) {
 		{"double", Variant::REAL},
 		{"java.lang.String",Variant::STRING},
 		{"[I",Variant::INT_ARRAY},
+		{"[B",Variant::RAW_ARRAY},
 		{"[F",Variant::REAL_ARRAY},
 		{"[java.lang.String",Variant::STRING_ARRAY},
 		{"com.android.godot.Dictionary", Variant::DICTIONARY},
@@ -1039,7 +1527,7 @@ static Variant::Type get_jni_type(const String& p_type) {
 
 static const char* get_jni_sig(const String& p_type) {
 
-	print_line("getting sig for " + p_type);
+
 	static struct {
 		const char *name;
 		const char *sig;
@@ -1052,6 +1540,7 @@ static const char* get_jni_sig(const String& p_type) {
 		{"java.lang.String","Ljava/lang/String;"},
 		{"com.android.godot.Dictionary", "Lcom/android/godot/Dictionary;"},
 		{"[I","[I"},
+		{"[B","[B"},
 		{"[F","[F"},
 		{"[java.lang.String","[Ljava/lang/String;"},
 		{NULL,"V"}
@@ -1135,10 +1624,14 @@ JNIEXPORT void JNICALL Java_com_android_godot_GodotLib_callobject(JNIEnv * env, 
 	for (int i=0; i<count; i++) {
 
 		jobject obj = env->GetObjectArrayElement(params, i);
-		Variant v = _jobject_to_variant(env, obj);
+		Variant v;
+		if (obj)
+			v=_jobject_to_variant(env, obj);
 		memnew_placement(&vlist[i], Variant);
 		vlist[i] = v;
 		vptr[i] = &vlist[i];
+		env->DeleteLocalRef(obj);
+
 	};
 
 	Variant::CallError err;
@@ -1146,6 +1639,34 @@ JNIEXPORT void JNICALL Java_com_android_godot_GodotLib_callobject(JNIEnv * env, 
 	// something
 };
 
+JNIEXPORT void JNICALL Java_com_android_godot_GodotLib_calldeferred(JNIEnv * env, jobject p_obj, jint ID, jstring method, jobjectArray params) {
+
+	String str_method = env->GetStringUTFChars( method, NULL );
+
+	Object* obj = ObjectDB::get_instance(ID);
+	ERR_FAIL_COND(!obj);
+
+	int count = env->GetArrayLength(params);
+	Variant args[VARIANT_ARG_MAX];
+
+    //print_line("Java->GD call: "+obj->get_type()+"::"+str_method+" argc "+itos(count));
+
+	for (int i=0; i<MIN(count,VARIANT_ARG_MAX); i++) {
+
+		jobject obj = env->GetObjectArrayElement(params, i);
+		if (obj)
+			args[i] = _jobject_to_variant(env, obj);
+		env->DeleteLocalRef(obj);
+
+//		print_line("\targ"+itos(i)+": "+Variant::get_type_name(args[i].get_type()));
+
+	};
+
+
+
+	obj->call_deferred(str_method, args[0],args[1],args[2],args[3],args[4]);
+	// something
+};
 
 //Main::cleanup();
 

@@ -54,7 +54,8 @@ public:
 	enum AnchorType {		
 		ANCHOR_BEGIN,
 		ANCHOR_END,
-		ANCHOR_RATIO		
+		ANCHOR_RATIO,
+		ANCHOR_CENTER,
 	};
 	
 	enum FocusMode {
@@ -192,7 +193,6 @@ private:
 
 	float _get_parent_range(int p_idx) const;
 	float _get_range(int p_idx) const;
-	Point2 _window_get_pos() const;
 	float _s2a(float p_val, AnchorType p_anchor,float p_range) const;
 	float _a2s(float p_val, AnchorType p_anchor,float p_range) const;
 	void _modal_stack_remove();
@@ -380,7 +380,7 @@ public:
 
 	void grab_click_focus();
 
-
+	void warp_mouse(const Point2& p_to_pos);
 
 	Control();	
 	~Control();

@@ -82,11 +82,16 @@ private:
 	Tree *tree;
 	LineEdit *file;
 	AcceptDialog *mkdirerr;
+	AcceptDialog *exterr;
 	OptionButton *filter;
 	DirAccess *dir_access;
 	ConfirmationDialog *confirm_save;
 	
 	Vector<String> filters;
+
+
+	static bool default_show_hidden_files;
+	bool show_hidden_files;
 
 	bool invalidated;
 	
@@ -139,6 +144,11 @@ public:
 
 	void set_access(Access p_access);
 	Access get_access() const;
+
+	void set_show_hidden_files(bool p_show);
+	bool is_showing_hidden_files() const;
+
+	static void set_default_show_hidden_files(bool p_show);
 
 	void invalidate();
 	

@@ -100,7 +100,7 @@ FileAccess *FileAccess::open(const String& p_path, int p_mode_flags, Error *r_er
 	FileAccess *ret=NULL;
 	if (!(p_mode_flags&WRITE) && PackedData::get_singleton() && !PackedData::get_singleton()->is_disabled()) {
 		ret = PackedData::get_singleton()->try_open_path(p_path);
-        if (ret) {
+		if (ret) {
 			if (r_error)
 				*r_error=OK;
 			return ret;
@@ -428,8 +428,30 @@ void FileAccess::store_string(const String& p_string) {
 	CharString cs=p_string.utf8();
 	store_buffer((uint8_t*)&cs[0],cs.length());
 
-
 }
+
+void FileAccess::store_pascal_string(const String& p_string) {
+
+	CharString cs = p_string.utf8();
+	store_32(cs.length());
+	store_buffer((uint8_t*)&cs[0], cs.length());
+};
+
+String FileAccess::get_pascal_string() {
+
+	uint32_t sl = get_32();
+	CharString cs;
+	cs.resize(sl+1);
+	get_buffer((uint8_t*)cs.ptr(),sl);
+	cs[sl]=0;
+
+	String ret;
+	ret.parse_utf8(cs.ptr());
+
+	return ret;
+};
+
+
 void FileAccess::store_line(const String& p_line) {
 
 	store_string(p_line);

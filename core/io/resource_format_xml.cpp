@@ -97,35 +97,37 @@ ResourceInteractiveLoaderXML::Tag* ResourceInteractiveLoaderXML::parse_tag(bool 
 
 	if (!complete) {
 		String name;
-		String value;
+		CharString r_value;
 		bool reading_value=false;
 
 		while(!f->eof_reached()) {
 
 			CharType c=get_char();
 			if (c=='>') {
-				if (value.length()) {
+				if (r_value.size()) {
 
-					tag.args[name]=value;
+					r_value.push_back(0);
+					tag.args[name].parse_utf8(r_value.get_data());
 				}
 				break;
 
-			} else if ( ((!reading_value && (c<33)) || c=='=' || c=='"') && tag.name.length()) {
+			} else if ( ((!reading_value && (c<33)) || c=='=' || c=='"' || c=='\'') && tag.name.length()) {
 
 				if (!reading_value && name.length()) {
 
 					reading_value=true;
-				} else if (reading_value && value.length()) {
+				} else if (reading_value && r_value.size()) {
 
-					tag.args[name]=value;
+					r_value.push_back(0);
+					tag.args[name].parse_utf8(r_value.get_data());
 					name="";
-					value="";
+					r_value.clear();
 					reading_value=false;
 				}
 
 			} else if (reading_value) {
 
-				value+=c;
+				r_value.push_back(c);
 			} else {
 
 				name+=c;
@@ -191,7 +193,10 @@ Error ResourceInteractiveLoaderXML::close_tag(const String& p_name) {
 
 void ResourceInteractiveLoaderXML::unquote(String& p_str) {
 
-	p_str=p_str.strip_edges();
+
+	p_str=p_str.strip_edges().replace("\"","").xml_unescape();
+
+	/*p_str=p_str.strip_edges();
 	p_str=p_str.replace("\"","");
 	p_str=p_str.replace("&gt;","<");
 	p_str=p_str.replace("&lt;",">");
@@ -203,7 +208,7 @@ void ResourceInteractiveLoaderXML::unquote(String& p_str) {
 		p_str=p_str.replace("&#"+String::num(i)+";",chr);
 	}
 	p_str=p_str.replace("&amp;","&");
-
+*/
 	//p_str.parse_utf8( p_str.ascii(true).get_data() );
 
 }
@@ -549,6 +554,12 @@ Error ResourceInteractiveLoaderXML::parse_property(Variant& r_v, String &r_name)
 				imgformat=Image::FORMAT_PVRTC4_ALPHA;
 			} else if (format=="etc") {
 				imgformat=Image::FORMAT_ETC;
+			} else if (format=="atc") {
+				imgformat=Image::FORMAT_ATC;
+			} else if (format=="atcai") {
+				imgformat=Image::FORMAT_ATC_ALPHA_INTERPOLATED;
+			} else if (format=="atcae") {
+				imgformat=Image::FORMAT_ATC_ALPHA_EXPLICIT;
 			} else if (format=="custom") {
 				imgformat=Image::FORMAT_CUSTOM;
 			} else {
@@ -561,7 +572,7 @@ Error ResourceInteractiveLoaderXML::parse_property(Variant& r_v, String &r_name)
 			int w=width.to_int();
 			int h=height.to_int();
 
-			if (w == 0 && w == 0) {
+			if (w == 0 && h == 0) {
 				//r_v = Image(w, h, imgformat);
 				r_v=Image();
 				String sdfsdfg;
@@ -644,11 +655,14 @@ Error ResourceInteractiveLoaderXML::parse_property(Variant& r_v, String &r_name)
 		while( idx<len*2) {
 
 			CharType c=get_char();
+			if (c<=32)
+				continue;
 
 			if (idx&1) {
 
 				byte|=HEX2CHR(c);
 				bytesptr[idx>>1]=byte;
+				//printf("%x\n",int(byte));
 			} else {
 
 				byte=HEX2CHR(c)<<4;
@@ -1349,6 +1363,31 @@ Error ResourceInteractiveLoaderXML::poll() {
 	if (error!=OK)
 		return error;
 
+	if (ext_resources.size()) {
+
+		error=ERR_FILE_CORRUPT;
+		String path=ext_resources.front()->get();
+
+		RES res = ResourceLoader::load(path);
+
+		if (res.is_null()) {
+
+			if (ResourceLoader::get_abort_on_missing_resources()) {
+				ERR_EXPLAIN(local_path+":"+itos(get_current_line())+": editor exported unexisting resource at: "+path);
+				ERR_FAIL_V(error);
+			} else {
+				ResourceLoader::notify_load_error("Resource Not Found: "+path);
+			}
+		} else {
+
+			resource_cache.push_back(res);
+		}
+
+		error=OK;
+		ext_resources.pop_front();
+		resource_current++;
+		return error;
+	}
 
 	bool exit;
 	Tag *tag = parse_tag(&exit);
@@ -1520,7 +1559,7 @@ int ResourceInteractiveLoaderXML::get_stage() const {
 }
 int ResourceInteractiveLoaderXML::get_stage_count() const {
 
-	return resources_total;
+	return resources_total+ext_resources.size();
 }
 
 ResourceInteractiveLoaderXML::~ResourceInteractiveLoaderXML() {
@@ -1563,6 +1602,12 @@ void ResourceInteractiveLoaderXML::get_dependencies(FileAccess *f,List<String> *
 		if (path.find("://")==-1 && path.is_rel_path()) {
 			// path is relative to file being loaded, so convert to a resource path
 			path=Globals::get_singleton()->localize_path(local_path.get_base_dir()+"/"+path);
+		}
+
+		if (path.ends_with("*")) {
+			ERR_FAIL_COND(!tag->args.has("type"));
+			String type = tag->args["type"];
+			path = ResourceLoader::guess_full_filename(path,type);
 		}
 
 		p_dependencies->push_back(path);
@@ -1633,6 +1678,19 @@ void ResourceInteractiveLoaderXML::open(FileAccess *p_f) {
 		ERR_FAIL();
 
 	}
+
+	String preload_depts = "deps/"+local_path.md5_text();
+	if (Globals::get_singleton()->has(preload_depts)) {
+		ext_resources.clear();
+		//ignore external resources and use these
+		NodePath depts=Globals::get_singleton()->get(preload_depts);
+
+		for(int i=0;i<depts.get_name_count();i++) {
+			ext_resources.push_back(depts.get_name(i));
+		}
+		print_line(local_path+" - EXTERNAL RESOURCES: "+itos(ext_resources.size()));
+	}
+
 
 }
 
@@ -1794,7 +1852,10 @@ void ResourceFormatSaverXMLInstance::escape(String& p_str) {
 	for (int i=1;i<32;i++) {
 
 		char chr[2]={i,0};
-		p_str=p_str.replace(chr,"&#"+String::num(i)+";");
+		const char hexn[16]={'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'};
+		const char hex[8]={'&','#','0','0',hexn[i>>4],hexn[i&0xf],';',0};
+
+		p_str=p_str.replace(chr,hex);
 	}
 
 
@@ -1935,6 +1996,9 @@ void ResourceFormatSaverXMLInstance::write_property(const String& p_name,const V
 				case Image::FORMAT_PVRTC4: params+=" format=\"pvrtc4\""; break;
 				case Image::FORMAT_PVRTC4_ALPHA: params+=" format=\"pvrtc4a\""; break;
 				case Image::FORMAT_ETC: params+=" format=\"etc\""; break;
+				case Image::FORMAT_ATC: params+=" format=\"atc\""; break;
+				case Image::FORMAT_ATC_ALPHA_EXPLICIT: params+=" format=\"atcae\""; break;
+				case Image::FORMAT_ATC_ALPHA_INTERPOLATED: params+=" format=\"atcai\""; break;
 				case Image::FORMAT_CUSTOM: params+=" format=\"custom\" custom_size=\""+itos(img.get_data().size())+"\""; break;
 				default: {}
 			}
@@ -1958,8 +2022,6 @@ void ResourceFormatSaverXMLInstance::write_property(const String& p_name,const V
 			if (res->get_path().length() && res->get_path().find("::")==-1) {
 				//external resource
 				String path=relative_paths?local_path.path_to_file(res->get_path()):res->get_path();
-				if (no_extension)
-					path=path.basename()+".*";
 				escape(path);
 				params+=" path=\""+path+"\"";
 			} else {
@@ -2447,7 +2509,10 @@ Error ResourceFormatSaverXMLInstance::save(const String &p_path,const RES& p_res
 	relative_paths=p_flags&ResourceSaver::FLAG_RELATIVE_PATHS;
 	skip_editor=p_flags&ResourceSaver::FLAG_OMIT_EDITOR_PROPERTIES;
 	bundle_resources=p_flags&ResourceSaver::FLAG_BUNDLE_RESOURCES;
-	no_extension=p_flags&ResourceSaver::FLAG_NO_EXTENSION;
+	takeover_paths=p_flags&ResourceSaver::FLAG_REPLACE_SUBRESOURCE_PATHS;
+	if (!p_path.begins_with("res://")) {
+		takeover_paths=false;
+	}
 	depth=0;
 
 	// save resources
@@ -2464,8 +2529,6 @@ Error ResourceFormatSaverXMLInstance::save(const String &p_path,const RES& p_res
 
 		write_tabs();
 		String p = E->get()->get_path();
-		if (no_extension)
-			p=p.basename()+".*";
 
 		enter_tag("ext_resource","path=\""+p+"\" type=\""+E->get()->get_save_type()+"\""); //bundled
 		exit_tag("ext_resource"); //bundled
@@ -2486,8 +2549,14 @@ Error ResourceFormatSaverXMLInstance::save(const String &p_path,const RES& p_res
 			enter_tag("main_resource",""); //bundled
 		else if (res->get_path().length() && res->get_path().find("::") == -1 )
 			enter_tag("resource","type=\""+res->get_type()+"\" path=\""+res->get_path()+"\""); //bundled
-		else
-			enter_tag("resource","type=\""+res->get_type()+"\" path=\"local://"+itos(resource_map[res])+"\"");
+		else {
+			int idx = resource_map[res];
+			enter_tag("resource","type=\""+res->get_type()+"\" path=\"local://"+itos(idx)+"\"");
+			if (takeover_paths) {
+				res->set_path(p_path+"::"+itos(idx),true);
+			}
+
+		}
 		write_string("\n",false);
 
 
@@ -2523,6 +2592,11 @@ Error ResourceFormatSaverXMLInstance::save(const String &p_path,const RES& p_res
 	}
 
 	exit_tag("resource_file");
+	if (f->get_error()!=OK && f->get_error()!=ERR_FILE_EOF) {
+		f->close();
+		return ERR_CANT_CREATE;
+	}
+
 	f->close();
 	//memdelete(f);
 

@@ -87,7 +87,7 @@ public:
 	enum Parameter {
 		PARAM_DIRECTION,
 		PARAM_SPREAD,
-		PARAM_LINEAR_VELOCITY,
+		PARAM_LINEAR_VELOCITY,		
 		PARAM_SPIN_VELOCITY,
 		PARAM_ORBIT_VELOCITY,
 		PARAM_GRAVITY_DIRECTION,
@@ -95,9 +95,12 @@ public:
 		PARAM_RADIAL_ACCEL,
 		PARAM_TANGENTIAL_ACCEL,
 		PARAM_DAMPING,
+		PARAM_INITIAL_ANGLE,
 		PARAM_INITIAL_SIZE,
 		PARAM_FINAL_SIZE,
 		PARAM_HUE_VARIATION,
+		PARAM_ANIM_SPEED_SCALE,
+		PARAM_ANIM_INITIAL_POS,
 		PARAM_MAX
 	};
 
@@ -116,8 +119,9 @@ private:
 		Point2 pos;
 		Vector2 velocity;
 		float rot;
+		float frame;
 		uint32_t seed;
-		Particle() { active=false; seed=123465789; rot=0;}
+		Particle() { active=false; seed=123465789; rot=0; frame=0;}
 	};
 
 	Vector<Particle> particles;
@@ -143,6 +147,10 @@ private:
 	float emit_timeout;
 	float time_to_live;
 	float time_scale;
+	bool flip_h;
+	bool flip_v;
+	int h_frames;
+	int v_frames;
 	Point2 emissor_offset;
 	Vector2 initial_velocity;
 	Vector2 extents;
@@ -196,6 +204,19 @@ public:
 
 	void set_explosiveness(float p_value);
 	float get_explosiveness() const;
+
+	void set_flip_h(bool p_flip);
+	bool is_flipped_h() const;
+
+	void set_flip_v(bool p_flip);
+	bool is_flipped_v() const;
+
+
+	void set_h_frames(int p_frames);
+	int get_h_frames() const;
+
+	void set_v_frames(int p_frames);
+	int get_v_frames() const;
 
 	void set_color_phases(int p_phases);
 	int get_color_phases() const;

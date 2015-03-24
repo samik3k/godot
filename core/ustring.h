@@ -31,6 +31,7 @@
 
 #include "typedefs.h"
 #include "vector.h"
+#include "array.h"
 
 /**
 	@author red <red@killy>
@@ -127,10 +128,13 @@ public:
 	String insert(int p_at_pos,String p_string) const;
 	String pad_decimals(int p_digits) const;
 	String pad_zeros(int p_digits) const;
+	String lpad(int min_length,const String& character=" ") const;
+	String rpad(int min_length,const String& character=" ") const;
+	String sprintf(const Array& values, bool* error) const;
 	static String num(double p_num,int p_decimals=-1);
 	static String num_scientific(double p_num);
 	static String num_real(double p_num);
-	static String num_int64(int64_t p_num);
+	static String num_int64(int64_t p_num,int base=10,bool capitalize_hex=false);
 	static String chr(CharType p_char);
 	static String md5(const uint8_t *p_md5);
 	bool is_numeric() const;
@@ -142,7 +146,7 @@ public:
 	int64_t to_int64() const;
 	static int to_int(const char* p_str);
 	static double to_double(const char* p_str);
-	static double to_double(const CharType* p_str, int p_len=-1, const CharType **r_end=NULL);
+	static double to_double(const CharType* p_str, const CharType **r_end=NULL);
 	static int64_t to_int(const CharType* p_str,int p_len=-1);
 	String capitalize() const;
 
@@ -150,6 +154,7 @@ public:
 	String get_slice(String p_splitter,int p_slice) const;
 
 	Vector<String> split(const String &p_splitter,bool p_allow_empty=true) const;
+	Vector<String> split_spaces() const;
 	Vector<float> split_floats(const String &p_splitter,bool p_allow_empty=true) const;
 	Vector<float> split_floats_mk(const Vector<String> &p_splitters,bool p_allow_empty=true) const;
 	Vector<int> split_ints(const String &p_splitter,bool p_allow_empty=true) const;
@@ -181,8 +186,10 @@ public:
 	static uint32_t hash(const char* p_cstr,int p_len); /* hash the string */
 	static uint32_t hash(const char* p_cstr); /* hash the string */
 	uint32_t hash() const; /* hash the string */
-	uint64_t hash64() const; /* hash the string */
-	
+	uint64_t hash64() const; /* hash the string */	
+	String md5_text() const;
+	Vector<uint8_t> md5_buffer() const;
+
 	inline bool empty() const { return length() == 0; }	
 
 	// path functions
@@ -200,7 +207,7 @@ public:
 	String xml_unescape() const;
 	String c_escape() const;
 	String c_unescape() const;
-
+	
 	String percent_encode() const;
 	String percent_decode() const;
 

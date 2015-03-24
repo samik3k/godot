@@ -72,6 +72,7 @@ void Label::_notification(int p_what) {
 		if (clip && !autowrap)
 			VisualServer::get_singleton()->canvas_item_set_clip(get_canvas_item(),true);
 
+
 		if (word_cache_dirty)
 			regenerate_word_cache();
 
@@ -87,7 +88,8 @@ void Label::_notification(int p_what) {
 		bool use_outlinde = get_constant("shadow_as_outline");
 		Point2 shadow_ofs(get_constant("shadow_offset_x"),get_constant("shadow_offset_y"));
 
-		
+		VisualServer::get_singleton()->canvas_item_set_distance_field_mode(get_canvas_item(),font.is_valid() && font->is_distance_field_hint());
+
 		int font_h = font->get_height();
 		int line_from=(int)get_val(); // + p_exposed.pos.y / font_h;
 		int lines_visible = size.y/font_h;
@@ -339,7 +341,7 @@ int Label::get_longest_line_width() const {
 
 int Label::get_line_count() const {
 
-	if (!is_inside_scene())
+	if (!is_inside_tree())
 		return 1;
 	if (word_cache_dirty)
 		const_cast<Label*>(this)->regenerate_word_cache();
@@ -397,11 +399,15 @@ void Label::regenerate_word_cache() {
 				
 			}
 			
+
 			if (current=='\n') {
-				
 				insert_newline=true;
 			} else {
 				total_char_cache++;
+			}
+
+			if (i<text.length() && text[i] == ' ') {
+				total_char_cache--;  // do not count spaces
 			}
 
 
@@ -442,7 +448,8 @@ void Label::regenerate_word_cache() {
 		last_width=line_width;
 		
 	}
-		
+	
+	//total_char_cache -= line_count + 1; // do not count new lines (including the first one)
 	
 	if (!autowrap) {
 		
@@ -519,6 +526,7 @@ String Label::get_text() const {
 	
 	return text;
 }
+
 void Label::set_visible_characters(int p_amount) {
 
 	visible_chars=p_amount;
@@ -530,7 +538,7 @@ void Label::set_percent_visible(float p_percent) {
 	if (p_percent<0)
 		set_visible_characters(-1);
 	else
-		set_visible_characters(get_total_character_count()*p_percent);
+		set_visible_characters(get_total_character_count()*p_percent);	
 	percent_visible=p_percent;
 }
 
@@ -582,7 +590,7 @@ void Label::_bind_methods() {
 	ADD_PROPERTY( PropertyInfo( Variant::INT, "valign", PROPERTY_HINT_ENUM,"Top,Center,Bottom,Fill" ),_SCS("set_valign"),_SCS("get_valign") );
 	ADD_PROPERTY( PropertyInfo( Variant::BOOL, "autowrap"),_SCS("set_autowrap"),_SCS("has_autowrap") );
 	ADD_PROPERTY( PropertyInfo( Variant::BOOL, "uppercase"),_SCS("set_uppercase"),_SCS("is_uppercase") );
-	ADD_PROPERTY( PropertyInfo( Variant::REAL, "percent_visible"),_SCS("set_percent_visible"),_SCS("get_percent_visible") );
+	ADD_PROPERTY( PropertyInfo( Variant::REAL, "percent_visible", PROPERTY_HINT_RANGE,"0,1,0.001"),_SCS("set_percent_visible"),_SCS("get_percent_visible") );
 
 }
 

@@ -32,6 +32,7 @@
 
 #include "variant.h"
 #include "map.h"
+#include "io/xml_parser.h"
 
 class DocData  {
 public:
@@ -76,12 +77,15 @@ public:
 		Vector<MethodDoc> signals;
 		Vector<ConstantDoc> constants;
 		Vector<PropertyDoc> properties;
+		Vector<PropertyDoc> theme_properties;
 
 	};
 
 	String version;
 
 	Map<String,ClassDoc> class_list;
+	Error _load(Ref<XMLParser> parser);
+
 
 public:
 
@@ -90,7 +94,6 @@ public:
 	Error load(const String& p_path);
 	Error save(const String& p_path);
 
-	Error save_compressed_header(const String& p_path);
 	Error load_compressed(const uint8_t *p_data, int p_compressed_size, int p_uncompressed_size);
 
 

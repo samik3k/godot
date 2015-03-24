@@ -28,13 +28,13 @@
 /*************************************************************************/
 #include "os_android.h"
 #include "drivers/gles2/rasterizer_gles2.h"
-#include "drivers/gles1/rasterizer_gles1.h"
+
 #include "core/io/file_access_buffered_fa.h"
 #include "drivers/unix/file_access_unix.h"
 #include "drivers/unix/dir_access_unix.h"
 
 #include "servers/visual/visual_server_raster.h"
-
+#include "servers/visual/visual_server_wrap_mt.h"
 #include "main/main.h"
 
 #include "core/globals.h"
@@ -49,11 +49,11 @@
 
 int OS_Android::get_video_driver_count() const {
 
-	return 2;
+	return 1;
 }
 const char * OS_Android::get_video_driver_name(int p_driver) const {
 
-	return p_driver==0?"GLES2":"GLES1";
+	return "GLES2";
 }
 
 OS::VideoMode OS_Android::get_default_video_mode() const {
@@ -87,11 +87,17 @@ void OS_Android::initialize_core() {
 
 #else
 
-	FileAccess::make_default<FileAccessBufferedFA<FileAccessJAndroid> >(FileAccess::ACCESS_RESOURCES);
+	if (use_apk_expansion)
+		FileAccess::make_default<FileAccessUnix>(FileAccess::ACCESS_RESOURCES);
+	else
+		FileAccess::make_default<FileAccessBufferedFA<FileAccessJAndroid> >(FileAccess::ACCESS_RESOURCES);
 	FileAccess::make_default<FileAccessUnix>(FileAccess::ACCESS_USERDATA);
 	FileAccess::make_default<FileAccessUnix>(FileAccess::ACCESS_FILESYSTEM);
 	//FileAccessBufferedFA<FileAccessUnix>::make_default();
-	DirAccess::make_default<DirAccessJAndroid>(DirAccess::ACCESS_RESOURCES);
+	if (use_apk_expansion)
+		DirAccess::make_default<DirAccessUnix>(DirAccess::ACCESS_RESOURCES);
+	else
+		DirAccess::make_default<DirAccessJAndroid>(DirAccess::ACCESS_RESOURCES);
 	DirAccess::make_default<DirAccessUnix>(DirAccess::ACCESS_USERDATA);
 	DirAccess::make_default<DirAccessUnix>(DirAccess::ACCESS_FILESYSTEM);
 
@@ -117,17 +123,21 @@ void OS_Android::initialize(const VideoMode& p_desired,int p_video_driver,int p_
 	AudioDriverManagerSW::add_driver(&audio_driver_android);
 
 
-	if (use_gl2) {
+	if (true) {
 		RasterizerGLES2 *rasterizer_gles22=memnew( RasterizerGLES2(false,use_reload_hooks,false,use_reload_hooks ) );
 		if (gl_extensions)
 			rasterizer_gles22->set_extensions(gl_extensions);
 		rasterizer = rasterizer_gles22;
 	} else {
-		rasterizer = memnew( RasterizerGLES1(use_reload_hooks, use_reload_hooks) );
+		//rasterizer = memnew( RasterizerGLES1(use_reload_hooks, use_reload_hooks) );
 
 	}
 
 	visual_server = memnew( VisualServerRaster(rasterizer) );
+	if (get_render_thread_mode() != RENDER_THREAD_UNSAFE) {
+
+		visual_server = memnew(VisualServerWrapMT(visual_server, false));
+	};
 	visual_server->init();
 	visual_server->cursor_set_visible(false, 0);
 
@@ -141,7 +151,7 @@ void OS_Android::initialize(const VideoMode& p_desired,int p_video_driver,int p_
 	sample_manager = memnew( SampleManagerMallocSW );
 	audio_server = memnew( AudioServerSW(sample_manager) );
 
-	audio_server->set_mixer_params(AudioMixerSW::INTERPOLATION_LINEAR,false);
+	audio_server->set_mixer_params(AudioMixerSW::INTERPOLATION_LINEAR,true);
 	audio_server->init();
 
 	spatial_sound_server = memnew( SpatialSoundServerSW );
@@ -279,6 +289,11 @@ OS::VideoMode OS_Android::get_video_mode(int p_screen) const {
 void OS_Android::get_fullscreen_mode_list(List<VideoMode> *p_list,int p_screen) const {
 
 	p_list->push_back(default_videomode);
+}
+
+Size2 OS_Android::get_window_size() const {
+
+	return Vector2(default_videomode.width,default_videomode.height);
 }
 
 String OS_Android::get_name() {
@@ -672,10 +687,39 @@ String OS_Android::get_unique_ID() const {
 	return OS::get_unique_ID();
 }
 
+Error OS_Android::native_video_play(String p_path, float p_volume) {
+	if (video_play_func)
+		video_play_func(p_path);
+    return OK;
+}
 
-OS_Android::OS_Android(GFXInitFunc p_gfx_init_func,void*p_gfx_init_ud, OpenURIFunc p_open_uri_func, GetDataDirFunc p_get_data_dir_func,GetLocaleFunc p_get_locale_func,GetModelFunc p_get_model_func, ShowVirtualKeyboardFunc p_show_vk, HideVirtualKeyboardFunc p_hide_vk,  SetScreenOrientationFunc p_screen_orient,GetUniqueIDFunc p_get_unique_id) {
+bool OS_Android::native_video_is_playing() {
+	if (video_is_playing_func)
+		return video_is_playing_func();
+    return false;
+}
+
+void OS_Android::native_video_pause() {
+	if (video_pause_func)
+		video_pause_func();
+}
+
+String OS_Android::get_system_dir(SystemDir p_dir) const {
+
+	if (get_system_dir_func)
+		return get_system_dir_func(p_dir);
+	return String(".");
+}
+
+void OS_Android::native_video_stop() {
+	if (video_stop_func)
+		video_stop_func();
+}
+
+OS_Android::OS_Android(GFXInitFunc p_gfx_init_func,void*p_gfx_init_ud, OpenURIFunc p_open_uri_func, GetDataDirFunc p_get_data_dir_func,GetLocaleFunc p_get_locale_func,GetModelFunc p_get_model_func, ShowVirtualKeyboardFunc p_show_vk, HideVirtualKeyboardFunc p_hide_vk,  SetScreenOrientationFunc p_screen_orient,GetUniqueIDFunc p_get_unique_id,GetSystemDirFunc p_get_sdir_func, VideoPlayFunc p_video_play_func, VideoIsPlayingFunc p_video_is_playing_func, VideoPauseFunc p_video_pause_func, VideoStopFunc p_video_stop_func,bool p_use_apk_expansion) {
 
 
+	use_apk_expansion=p_use_apk_expansion;
 	default_videomode.width=800;
 	default_videomode.height=600;
 	default_videomode.fullscreen=true;
@@ -694,6 +738,12 @@ OS_Android::OS_Android(GFXInitFunc p_gfx_init_func,void*p_gfx_init_ud, OpenURIFu
 	get_locale_func=p_get_locale_func;
 	get_model_func=p_get_model_func;
 	get_unique_id_func=p_get_unique_id;
+	get_system_dir_func=p_get_sdir_func;
+    
+	video_play_func = p_video_play_func;
+	video_is_playing_func = p_video_is_playing_func;
+	video_pause_func = p_video_pause_func;
+	video_stop_func = p_video_stop_func;
 
 	show_virtual_keyboard_func = p_show_vk;
 	hide_virtual_keyboard_func = p_hide_vk;

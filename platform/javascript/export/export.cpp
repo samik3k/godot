@@ -60,8 +60,6 @@ class EditorExportPlatformJavaScript : public EditorExportPlatform {
 
 	Ref<ImageTexture> logo;
 
-	static Error save_pack_file_js(void *p_userdata,const String& p_path, const Vector<uint8_t>& p_data,int p_file,int p_total);
-
 protected:
 
 	bool _set(const StringName& p_name, const Variant& p_value);
@@ -79,11 +77,11 @@ public:
 	virtual int get_device_count() const { return show_run?1:0; };
 	virtual String get_device_name(int p_device) const  { return "Run in Browser"; }
 	virtual String get_device_info(int p_device) const { return "Run exported HTML in the system's default browser."; }
-	virtual Error run(int p_device);
+	virtual Error run(int p_device,bool p_dumb=false);
 
 	virtual bool requieres_password(bool p_debug) const { return false; }
 	virtual String get_binary_extension() const { return "html"; }
-	virtual Error export_project(const String& p_path,bool p_debug,const String& p_password="");
+	virtual Error export_project(const String& p_path,bool p_debug,bool p_dumb=false);
 
 	virtual bool can_export(String *r_error=NULL) const;
 
@@ -103,8 +101,6 @@ bool EditorExportPlatformJavaScript::_set(const StringName& p_name, const Varian
 		show_run=p_value;
 	else if (n=="options/memory_size")
 		max_memory=p_value;
-	else if (n=="options/pack_mode")
-		pack_mode=PackMode(int(p_value));
 	else
 		return false;
 
@@ -123,8 +119,6 @@ bool EditorExportPlatformJavaScript::_get(const StringName& p_name,Variant &r_re
 		r_ret=show_run;
 	else if (n=="options/memory_size")
 		r_ret=max_memory;
-	else if (n=="options/pack_mode")
-		r_ret=pack_mode;
 	else
 		return false;
 
@@ -132,41 +126,14 @@ bool EditorExportPlatformJavaScript::_get(const StringName& p_name,Variant &r_re
 }
 void EditorExportPlatformJavaScript::_get_property_list( List<PropertyInfo> *p_list) const{
 
-	p_list->push_back( PropertyInfo( Variant::STRING, "custom_package/debug", PROPERTY_HINT_FILE,"zip"));
-	p_list->push_back( PropertyInfo( Variant::STRING, "custom_package/release", PROPERTY_HINT_FILE,"zip"));
-	p_list->push_back( PropertyInfo( Variant::INT, "options/pack_mode",PROPERTY_HINT_ENUM,"Single File, Multiple Files"));
+	p_list->push_back( PropertyInfo( Variant::STRING, "custom_package/debug", PROPERTY_HINT_GLOBAL_FILE,"zip"));
+	p_list->push_back( PropertyInfo( Variant::STRING, "custom_package/release", PROPERTY_HINT_GLOBAL_FILE,"zip"));
 	p_list->push_back( PropertyInfo( Variant::INT, "options/memory_size",PROPERTY_HINT_ENUM,"32mb,64mb,128mb,256mb,512mb,1024mb"));
 	p_list->push_back( PropertyInfo( Variant::BOOL, "browser/enable_run"));
 
 	//p_list->push_back( PropertyInfo( Variant::INT, "resources/pack_mode", PROPERTY_HINT_ENUM,"Copy,Single Exec.,Pack (.pck),Bundles (Optical)"));
 
 }
-
-
-static const char* files_pre=""\
-"var Module;\n"\
-"if (typeof Module === 'undefined') Module = eval('(function() { try { return Module || {} } catch(e) { return {} } })()');\n"\
-"if (!Module.expectedDataFileDownloads) {\n"\
-"  Module.expectedDataFileDownloads = 0;\n"\
-"  Module.finishedDataFileDownloads = 0;\n"\
-"}\n"\
-"Module.expectedDataFileDownloads++;\n"\
-"(function() {\n"\
-"\n"\
-"  function runWithFS() {\n"\
-"function assert(check, msg) {\n"\
-"  if (!check) throw msg + new Error().stack;\n"\
-"} \n";
-
-static const char* files_post=""\
-"}\n"\
-"if (Module['calledRun']) {\n"\
-"  runWithFS();\n"\
-"} else {\n"\
-"  if (!Module['preRun']) Module['preRun'] = [];\n"\
-"  Module[\"preRun\"].push(runWithFS); // FS is not initialized yet, wait for it\n"\
-"}\n"\
-"})();";
 
 
 static void _fix_html(Vector<uint8_t>& html,const String& name,int max_memory) {
@@ -178,7 +145,7 @@ static void _fix_html(Vector<uint8_t>& html,const String& name,int max_memory) {
 	Vector<String> lines=str.split("\n");
 	for(int i=0;i<lines.size();i++) {
 		if (lines[i].find("godot.js")!=-1) {
-			strnew+="<script type=\"text/javascript\" src=\""+name+"_files.js\"></script>\n";
+			strnew+="<script type=\"text/javascript\" src=\""+name+"_filesystem.js\"></script>\n";
 			strnew+="<script async type=\"text/javascript\" src=\""+name+".js\"></script>\n";
 		} else if (lines[i].find("var Module")!=-1) {
 			strnew+=lines[i];
@@ -195,6 +162,28 @@ static void _fix_html(Vector<uint8_t>& html,const String& name,int max_memory) {
 	}
 }
 
+static void _fix_files(Vector<uint8_t>& html,uint64_t p_data_size) {
+
+
+	String str;
+	String strnew;
+	str.parse_utf8((const char*)html.ptr(),html.size());
+	Vector<String> lines=str.split("\n");
+	for(int i=0;i<lines.size();i++) {
+		if (lines[i].find("$DPLEN")!=-1) {
+			strnew+=lines[i].replace("$DPLEN",itos(p_data_size));
+		} else {
+			strnew+=lines[i]+"\n";
+		}
+	}
+
+	CharString cs = strnew.utf8();
+	html.resize(cs.length());
+	for(int i=9;i<cs.length();i++) {
+		html[i]=cs[i];
+	}
+
+}
 
 struct JSExportData {
 
@@ -204,58 +193,8 @@ struct JSExportData {
 };
 
 
-static void store_file_buffer(FileAccess*f,const String& p_path,const Vector<uint8_t>& p_data) {
 
-
-	String pre = "Module['FS_createDataFile']('/', '"+p_path.replace("res://","")+"',[";
-	CharString cs = pre.utf8();
-	f->store_buffer((const uint8_t*)cs.ptr(),cs.length());
-	for(int i=0;i<p_data.size();i++) {
-
-
-		uint8_t c=',';
-		if (i>0)
-			f->store_buffer(&c,1);
-
-		uint8_t str[4];
-		uint8_t d = p_data[i];
-		if (d<10) {
-			str[0]='0'+d;
-			str[1]=0;
-			f->store_buffer(str,1);
-		} else if (d<100) {
-
-			str[0]='0'+d/10;
-			str[1]='0'+d%10;
-			str[2]=0;
-			f->store_buffer(str,2);
-
-		} else {
-			str[0]='0'+d/100;
-			str[1]='0'+(d/10)%10;
-			str[2]='0'+d%10;
-			str[3]=0;
-			f->store_buffer(str,3);
-		}
-	}
-	String post = "],true,true);\n";
-	cs = post.utf8();
-	f->store_buffer((const uint8_t*)cs.ptr(),cs.length());
-}
-
-
-Error EditorExportPlatformJavaScript::save_pack_file_js(void *p_userdata,const String& p_path, const Vector<uint8_t>& p_data,int p_file,int p_total) {
-
-	JSExportData *ed=(JSExportData*)p_userdata;
-
-	FileAccess *f=(FileAccess *)p_userdata;
-	store_file_buffer(ed->f,p_path,p_data);
-	ed->ep->step("File: "+p_path,3+p_file*100/p_total);
-	return OK;
-
-}
-
-Error EditorExportPlatformJavaScript::export_project(const String& p_path,bool p_debug,const String& p_password) {
+Error EditorExportPlatformJavaScript::export_project(const String& p_path, bool p_debug, bool p_dumb) {
 
 
 	String src_template;
@@ -278,6 +217,20 @@ Error EditorExportPlatformJavaScript::export_project(const String& p_path,bool p
 	zlib_filefunc_def io = zipio_create_io_from_file(&src_f);
 
 	ep.step("Exporting to HTML5",0);
+
+	ep.step("Finding Files..",1);
+
+	FileAccess *f=FileAccess::open(p_path.get_base_dir()+"/data.pck",FileAccess::WRITE);
+	if (!f) {
+		EditorNode::add_io_error("Could not create file for writing:\n"+p_path.basename()+"_files.js");
+		return ERR_FILE_CANT_WRITE;
+	}
+	Error err = save_pack(f);
+	size_t len = f->get_len();
+	memdelete(f);
+	if (err)
+		return err;
+
 
 	unzFile pkg = unzOpen2(src_template.utf8().get_data(), &io);
 	if (!pkg) {
@@ -314,6 +267,11 @@ Error EditorExportPlatformJavaScript::export_project(const String& p_path,bool p
 			_fix_html(data,p_path.get_file().basename(),1<<(max_memory+5));
 			file=p_path.get_file();
 		}
+		if (file=="filesystem.js") {
+
+			_fix_files(data,len);
+			file=p_path.get_file().basename()+"_filesystem.js";
+		}
 		if (file=="godot.js") {
 
 			//_fix_godot(data);
@@ -335,56 +293,13 @@ Error EditorExportPlatformJavaScript::export_project(const String& p_path,bool p
 	}
 
 
-	ep.step("Finding Files..",1);
-
-	Vector<String> remaps;
-
-	FileAccess *f=FileAccess::open(p_path.basename()+"_files.js",FileAccess::WRITE);
-	if (!f) {
-		EditorNode::add_io_error("Could not create file for writing:\n"+p_path.basename()+"_files.js");
-		return ERR_FILE_CANT_WRITE;
-	}
-
-	f->store_buffer((const uint8_t*)files_pre,strlen(files_pre));
-
-	if (pack_mode==PACK_SINGLE_FILE) {
-
-		String ftmp = EditorSettings::get_singleton()->get_settings_path()+"/tmp/webpack.pck";
-		FileAccess *f2 = FileAccess::open(ftmp,FileAccess::WRITE);
-		if (!f2) {
-			memdelete(f);
-			return ERR_CANT_CREATE;
-		}
-		Error err = save_pack(f2,false);
-		memdelete(f2);
-		if (err) {
-			memdelete(f);
-			return ERR_CANT_CREATE;
-		}
-
-		Vector<uint8_t> data = FileAccess::get_file_as_array(ftmp);
-		store_file_buffer(f,"data.pck",data);
-
-
-	} else {
-		JSExportData ed;
-		ed.ep=&ep;
-		ed.f=f;
-
-		Error err =export_project_files(save_pack_file_js,&ed,false);
-		if (err)
-			return err;
-	}
-	f->store_buffer((const uint8_t*)files_post,strlen(files_post));
-	memdelete(f);
-
 
 	return OK;
 
 }
 
 
-Error EditorExportPlatformJavaScript::run(int p_device) {
+Error EditorExportPlatformJavaScript::run(int p_device, bool p_dumb) {
 
 	String path = EditorSettings::get_singleton()->get_settings_path()+"/tmp/tmp_export.html";
 	Error err = export_project(path,true,"");

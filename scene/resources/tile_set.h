@@ -32,6 +32,8 @@
 #include "resource.h"
 #include "scene/resources/shape_2d.h"
 #include "scene/resources/texture.h"
+#include "scene/2d/light_occluder_2d.h"
+#include "scene/2d/navigation_polygon.h"
 
 class TileSet : public Resource {
 
@@ -42,8 +44,14 @@ class TileSet : public Resource {
 		String name;
 		Ref<Texture> texture;
 		Vector2 offset;
+		Vector2 shape_offset;
 		Rect2i region;
 		Vector<Ref<Shape2D> > shapes;
+		Vector2 occluder_offset;
+		Ref<OccluderPolygon2D> occluder;
+		Vector2 navigation_polygon_offset;
+		Ref<NavigationPolygon> navigation_polygon;
+		Ref<CanvasItemMaterial> material;
 	};
 
 	Map<int,Data> tile_map;
@@ -56,6 +64,7 @@ protected:
 	void _get_property_list( List<PropertyInfo> *p_list) const;
 	void _tile_set_shapes(int p_id,const Array& p_shapes);
 	Array _tile_get_shapes(int p_id) const;
+	Array _get_tiles_ids() const;
 
 	static void _bind_methods();
 public:
@@ -70,14 +79,32 @@ public:
 	void tile_set_texture(int p_id, const Ref<Texture> &p_texture);
 	Ref<Texture> tile_get_texture(int p_id) const;
 
-	void tile_set_offset(int p_id,const Vector2 &p_offset);
-	Vector2 tile_get_offset(int p_id) const;
+	void tile_set_texture_offset(int p_id,const Vector2 &p_offset);
+	Vector2 tile_get_texture_offset(int p_id) const;
+
+	void tile_set_shape_offset(int p_id,const Vector2 &p_offset);
+	Vector2 tile_get_shape_offset(int p_id) const;
 
 	void tile_set_region(int p_id,const Rect2 &p_region);
 	Rect2 tile_get_region(int p_id) const;
 
 	void tile_set_shape(int p_id,const Ref<Shape2D> &p_shape);
 	Ref<Shape2D> tile_get_shape(int p_id) const;
+
+	void tile_set_material(int p_id,const Ref<CanvasItemMaterial> &p_material);
+	Ref<CanvasItemMaterial> tile_get_material(int p_id) const;
+
+	void tile_set_occluder_offset(int p_id,const Vector2& p_offset);
+	Vector2 tile_get_occluder_offset(int p_id) const;
+
+	void tile_set_light_occluder(int p_id,const Ref<OccluderPolygon2D> &p_light_occluder);
+	Ref<OccluderPolygon2D> tile_get_light_occluder(int p_id) const;
+
+	void tile_set_navigation_polygon_offset(int p_id,const Vector2& p_offset);
+	Vector2 tile_get_navigation_polygon_offset(int p_id) const;
+
+	void tile_set_navigation_polygon(int p_id,const Ref<NavigationPolygon> &p_navigation_polygon);
+	Ref<NavigationPolygon> tile_get_navigation_polygon(int p_id) const;
 
 	void tile_set_shapes(int p_id,const Vector<Ref<Shape2D> > &p_shapes);
 	Vector<Ref<Shape2D> > tile_get_shapes(int p_id) const;

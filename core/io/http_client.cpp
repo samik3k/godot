@@ -27,14 +27,16 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
 #include "http_client.h"
+#include "io/stream_peer_ssl.h"
 
+VARIANT_ENUM_CAST(HTTPClient::Status);
 
 Error HTTPClient::connect_url(const String& p_url) {
 
 	return OK;
 }
 
-Error HTTPClient::connect(const String &p_host,int p_port){
+Error HTTPClient::connect(const String &p_host, int p_port, bool p_ssl,bool p_verify_host){
 
 	close();
 	conn_port=p_port;
@@ -49,7 +51,12 @@ Error HTTPClient::connect(const String &p_host,int p_port){
 	}
 
 
+	ssl=p_ssl;
+	ssl_verify_host=p_verify_host;
 	connection=tcp_connection;
+
+
+
 	if (conn_host.is_valid_ip_address()) {
 		//is ip
 		Error err = tcp_connection->connect(IP_Address(conn_host),p_port);
@@ -97,8 +104,16 @@ Error HTTPClient::request( Method p_method, const String& p_url, const Vector<St
 
 	String request=String(_methods[p_method])+" "+p_url+" HTTP/1.1\r\n";
 	request+="Host: "+conn_host+":"+itos(conn_port)+"\r\n";
+	bool add_clen=p_body.length()>0;
 	for(int i=0;i<p_headers.size();i++) {
 		request+=p_headers[i]+"\r\n";
+		if (add_clen && p_headers[i].find("Content-Length:")==0) {
+			add_clen=false;
+		}
+	}
+	if (add_clen) {
+		request+="Content-Length: "+itos(p_body.utf8().length())+"\r\n";
+		//should it add utf8 encoding? not sure
 	}
 	request+="\r\n";
 	request+=p_body;
@@ -225,6 +240,17 @@ Error HTTPClient::poll(){
 					return OK; //do none
 				} break;
 				case StreamPeerTCP::STATUS_CONNECTED: {
+					if (ssl) {
+						Ref<StreamPeerSSL> ssl = StreamPeerSSL::create();
+						Error err = ssl->connect(tcp_connection,true,ssl_verify_host?conn_host:String());
+						if (err!=OK) {
+							close();
+							status=STATUS_SSL_HANDSHAKE_ERROR;
+							return ERR_CANT_CONNECT;
+						}
+						print_line("SSL! TURNED ON!");
+						connection=ssl;
+					}
 					status=STATUS_CONNECTED;
 					return OK;
 				} break;
@@ -247,7 +273,7 @@ Error HTTPClient::poll(){
 			while(true) {
 				uint8_t byte;
 				int rec=0;
-				Error err = connection->get_partial_data(&byte,1,rec);
+				Error err = _get_http_data(&byte,1,rec);
 				if (err!=OK) {
 					close();
 					status=STATUS_CONNECTION_ERROR;
@@ -391,7 +417,7 @@ ByteArray HTTPClient::read_response_body_chunk() {
 				//reading len
 				uint8_t b;
 				int rec=0;
-				err = connection->get_partial_data(&b,1,rec);
+				err = _get_http_data(&b,1,rec);
 
 				if (rec==0)
 					break;
@@ -445,7 +471,7 @@ ByteArray HTTPClient::read_response_body_chunk() {
 			} else {
 
 				int rec=0;
-				err = connection->get_partial_data(&chunk[chunk.size()-chunk_left],chunk_left,rec);
+				err = _get_http_data(&chunk[chunk.size()-chunk_left],chunk_left,rec);
 				if (rec==0) {
 					break;
 				}
@@ -476,20 +502,29 @@ ByteArray HTTPClient::read_response_body_chunk() {
 		}
 
 	} else {
-		ByteArray::Write r = tmp_read.write();
-		int rec=0;
-		err = connection->get_partial_data(r.ptr(),MIN(body_left,tmp_read.size()),rec);
-		if (rec>0) {
-			ByteArray ret;
-			ret.resize(rec);
-			ByteArray::Write w = ret.write();
-			copymem(w.ptr(),r.ptr(),rec);
-			body_left-=rec;
-			if (body_left==0) {
-				status=STATUS_CONNECTED;
+
+		int to_read = MIN(body_left,read_chunk_size);
+		ByteArray ret;
+		ret.resize(to_read);
+		ByteArray::Write w = ret.write();
+		int _offset = 0;
+		while (to_read > 0) {
+			int rec=0;
+			err = _get_http_data(w.ptr()+_offset,to_read,rec);
+			if (rec>0) {
+				body_left-=rec;
+				to_read-=rec;
+				_offset += rec;
+			} else {
+				if (to_read>0) //ended up reading less
+					ret.resize(_offset);
+				break;
 			}
-			return ret;
 		}
+		if (body_left==0) {
+			status=STATUS_CONNECTED;
+		}
+		return ret;
 
 	}
 
@@ -517,9 +552,34 @@ HTTPClient::Status HTTPClient::get_status() const {
 	return status;
 }
 
+void HTTPClient::set_blocking_mode(bool p_enable) {
+
+	blocking=p_enable;
+}
+
+bool HTTPClient::is_blocking_mode_enabled() const{
+
+	return blocking;
+}
+
+Error HTTPClient::_get_http_data(uint8_t* p_buffer, int p_bytes,int &r_received) {
+
+	if (blocking) {
+
+		Error err = connection->get_data(p_buffer,p_bytes);
+		if (err==OK)
+			r_received=p_bytes;
+		else
+			r_received=0;
+		return err;
+	} else {
+		return connection->get_partial_data(p_buffer,p_bytes,r_received);
+	}
+}
+
 void HTTPClient::_bind_methods() {
 
-	ObjectTypeDB::bind_method(_MD("connect:Error","host","port"),&HTTPClient::connect);
+	ObjectTypeDB::bind_method(_MD("connect:Error","host","port","use_ssl"),&HTTPClient::connect,DEFVAL(false),DEFVAL(true));
 	ObjectTypeDB::bind_method(_MD("set_connection","connection:StreamPeer"),&HTTPClient::set_connection);
 	ObjectTypeDB::bind_method(_MD("request","method","url","headers","body"),&HTTPClient::request,DEFVAL(String()));
 	ObjectTypeDB::bind_method(_MD("send_body_text","body"),&HTTPClient::send_body_text);
@@ -533,9 +593,14 @@ void HTTPClient::_bind_methods() {
 	ObjectTypeDB::bind_method(_MD("get_response_headers_as_dictionary"),&HTTPClient::_get_response_headers_as_dictionary);
 	ObjectTypeDB::bind_method(_MD("get_response_body_length"),&HTTPClient::get_response_body_length);
 	ObjectTypeDB::bind_method(_MD("read_response_body_chunk"),&HTTPClient::read_response_body_chunk);
+	ObjectTypeDB::bind_method(_MD("set_read_chunk_size","bytes"),&HTTPClient::set_read_chunk_size);
+
+	ObjectTypeDB::bind_method(_MD("set_blocking_mode","enabled"),&HTTPClient::set_blocking_mode);
+	ObjectTypeDB::bind_method(_MD("is_blocking_mode_enabled"),&HTTPClient::is_blocking_mode_enabled);
 
 	ObjectTypeDB::bind_method(_MD("get_status"),&HTTPClient::get_status);
 	ObjectTypeDB::bind_method(_MD("poll:Error"),&HTTPClient::poll);
+
 
 	BIND_CONSTANT( METHOD_GET );
 	BIND_CONSTANT( METHOD_HEAD );
@@ -556,6 +621,7 @@ void HTTPClient::_bind_methods() {
 	BIND_CONSTANT( STATUS_REQUESTING );  // request in progress
 	BIND_CONSTANT( STATUS_BODY );  // request resulted in body );  which must be read
 	BIND_CONSTANT( STATUS_CONNECTION_ERROR );
+	BIND_CONSTANT( STATUS_SSL_HANDSHAKE_ERROR );
 
 
 	BIND_CONSTANT( RESPONSE_CONTINUE );
@@ -618,9 +684,14 @@ void HTTPClient::_bind_methods() {
 
 }
 
+void HTTPClient::set_read_chunk_size(int p_size) {
+	ERR_FAIL_COND(p_size<256 || p_size>(1<<24));
+	read_chunk_size=p_size;
+}
+
 HTTPClient::HTTPClient(){
 
-	tcp_connection = StreamPeerTCP::create();
+	tcp_connection = StreamPeerTCP::create_ref();
 	resolving = IP::RESOLVER_INVALID_ID;
 	status=STATUS_DISCONNECTED;
 	conn_port=80;
@@ -629,8 +700,9 @@ HTTPClient::HTTPClient(){
 	body_left=0;
 	chunk_left=0;
 	response_num=0;
-
-	tmp_read.resize(4096);
+	ssl=false;
+	blocking=false;
+	read_chunk_size=4096;
 }
 
 HTTPClient::~HTTPClient(){

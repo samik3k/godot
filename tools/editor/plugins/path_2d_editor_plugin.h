@@ -40,9 +40,9 @@
 */
 class CanvasItemEditor;
 
-class Path2DEditor : public ButtonGroup {
+class Path2DEditor : public HBoxContainer {
 
-	OBJ_TYPE(Path2DEditor, ButtonGroup );
+	OBJ_TYPE(Path2DEditor, HBoxContainer);
 
 	UndoRedo *undo_redo;
 
@@ -50,6 +50,24 @@ class Path2DEditor : public ButtonGroup {
 	EditorNode *editor;
 	Panel *panel;
 	Path2D *node;
+
+	HBoxContainer *base_hb;
+	Separator *sep;
+
+	enum Mode {
+		MODE_CREATE,
+		MODE_EDIT,
+		MODE_EDIT_CURVE,
+		MODE_DELETE,
+		ACTION_CLOSE
+	};
+
+	Mode mode;
+	ToolButton *curve_create;
+	ToolButton *curve_edit;
+	ToolButton *curve_edit_curve;
+	ToolButton *curve_del;
+	ToolButton *curve_close;
 
 	enum Action {
 
@@ -65,18 +83,19 @@ class Path2DEditor : public ButtonGroup {
 	Point2 moving_from;
 	Point2 moving_screen_from;
 
+	void _mode_selected(int p_mode);
 
 	void _canvas_draw();
-
+	void _node_visibility_changed();
+friend class Path2DEditorPlugin;
 protected:
 	void _notification(int p_what);
 	void _node_removed(Node *p_node);
 	static void _bind_methods();
 public:
 
-	Vector2 snap_point(const Vector2& p_point) const;
 	bool forward_input_event(const InputEvent& p_event);
-	void edit(Node *p_collision_polygon);
+	void edit(Node *p_path2d);
 	Path2DEditor(EditorNode *p_editor);
 };
 
@@ -84,12 +103,12 @@ class Path2DEditorPlugin : public EditorPlugin {
 
 	OBJ_TYPE( Path2DEditorPlugin, EditorPlugin );
 
-	Path2DEditor *collision_polygon_editor;
+	Path2DEditor *path2d_editor;
 	EditorNode *editor;
 
 public:
 
-	virtual bool forward_input_event(const InputEvent& p_event) { return collision_polygon_editor->forward_input_event(p_event); }
+	virtual bool forward_input_event(const InputEvent& p_event) { return path2d_editor->forward_input_event(p_event); }
 
 	virtual String get_name() const { return "Path2D"; }
 	bool has_main_screen() const { return false; }

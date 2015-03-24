@@ -32,16 +32,17 @@
 #include "scene/2d/physics_body_2d.h"
 #include "scene/animation/animation_player.h"
 #include "scene/scene_string_names.h"
+#include "particles_2d.h"
 
 void VisibilityNotifier2D::_enter_viewport(Viewport* p_viewport) {
 
 	ERR_FAIL_COND(viewports.has(p_viewport));
 	viewports.insert(p_viewport);
+
 	if (viewports.size()==1) {
 		emit_signal(SceneStringNames::get_singleton()->enter_screen);
+
 		_screen_enter();
-
-
 	}
 	emit_signal(SceneStringNames::get_singleton()->enter_viewport,p_viewport);
 
@@ -64,7 +65,7 @@ void VisibilityNotifier2D::_exit_viewport(Viewport* p_viewport){
 void VisibilityNotifier2D::set_rect(const Rect2& p_rect){
 
 	rect=p_rect;
-	if (is_inside_scene())
+	if (is_inside_tree())
 		get_world_2d()->_update_notifier(this,get_global_transform().xform(rect));
 
 	_change_notify("rect");
@@ -85,7 +86,7 @@ void VisibilityNotifier2D::_notification(int p_what) {
 
 
 	switch(p_what) {
-		case NOTIFICATION_ENTER_SCENE: {
+		case NOTIFICATION_ENTER_TREE: {
 
 			//get_world_2d()->
 			get_world_2d()->_register_notifier(this,get_global_transform().xform(rect));
@@ -97,12 +98,12 @@ void VisibilityNotifier2D::_notification(int p_what) {
 		} break;
 		case NOTIFICATION_DRAW: {
 
-			if (get_scene()->is_editor_hint()) {
+			if (get_tree()->is_editor_hint()) {
 
 				draw_rect(rect,Color(1,0.5,1,0.2));
 			}
 		} break;
-		case NOTIFICATION_EXIT_SCENE: {
+		case NOTIFICATION_EXIT_TREE: {
 
 			get_world_2d()->_remove_notifier(this);
 		} break;
@@ -188,9 +189,18 @@ void VisibilityEnabler2D::_find_nodes(Node* p_node) {
 
 	}
 
+	if (enabler[ENABLER_PAUSE_PARTICLES]) {
+
+		Particles2D *ps = p_node->cast_to<Particles2D>();
+		if (ps) {
+			add=true;
+		}
+
+	}
+
 	if (add) {
 
-		p_node->connect(SceneStringNames::get_singleton()->exit_scene,this,"_node_removed",varray(p_node),CONNECT_ONESHOT);
+		p_node->connect(SceneStringNames::get_singleton()->exit_tree,this,"_node_removed",varray(p_node),CONNECT_ONESHOT);
 		nodes[p_node]=meta;
 		_change_node_state(p_node,false);
 	}
@@ -207,9 +217,9 @@ void VisibilityEnabler2D::_find_nodes(Node* p_node) {
 
 void VisibilityEnabler2D::_notification(int p_what){
 
-	if (p_what==NOTIFICATION_ENTER_SCENE) {
+	if (p_what==NOTIFICATION_ENTER_TREE) {
 
-		if (get_scene()->is_editor_hint())
+		if (get_tree()->is_editor_hint())
 			return;
 
 
@@ -222,9 +232,9 @@ void VisibilityEnabler2D::_notification(int p_what){
 
 	}
 
-	if (p_what==NOTIFICATION_EXIT_SCENE) {
+	if (p_what==NOTIFICATION_EXIT_TREE) {
 
-		if (get_scene()->is_editor_hint())
+		if (get_tree()->is_editor_hint())
 			return;
 
 
@@ -235,7 +245,7 @@ void VisibilityEnabler2D::_notification(int p_what){
 
 			if (!visible)
 				_change_node_state(E->key(),true);
-			E->key()->disconnect(SceneStringNames::get_singleton()->exit_scene,this,"_node_removed");
+			E->key()->disconnect(SceneStringNames::get_singleton()->exit_tree,this,"_node_removed");
 		}
 
 		nodes.clear();
@@ -254,10 +264,10 @@ void VisibilityEnabler2D::_change_node_state(Node* p_node,bool p_enabled) {
 			if (p_enabled) {
 				RigidBody2D::Mode mode = RigidBody2D::Mode(nodes[p_node].operator int());
 				//rb->set_mode(mode);
-				rb->set_active(true);
+				rb->set_sleeping(false);
 			} else {
 				//rb->set_mode(RigidBody2D::MODE_STATIC);
-				rb->set_active(false);
+				rb->set_sleeping(true);
 			}
 		}
 	}
@@ -268,6 +278,15 @@ void VisibilityEnabler2D::_change_node_state(Node* p_node,bool p_enabled) {
 		if (ap) {
 
 			ap->set_active(p_enabled);
+		}
+	}
+
+	{
+		Particles2D *ps=p_node->cast_to<Particles2D>();
+
+		if (ps) {
+
+			ps->set_emitting(p_enabled);
 		}
 	}
 
@@ -292,9 +311,11 @@ void VisibilityEnabler2D::_bind_methods(){
 
 	ADD_PROPERTYI( PropertyInfo(Variant::BOOL,"enabler/pause_animations"),_SCS("set_enabler"),_SCS("is_enabler_enabled"), ENABLER_PAUSE_ANIMATIONS );
 	ADD_PROPERTYI( PropertyInfo(Variant::BOOL,"enabler/freeze_bodies"),_SCS("set_enabler"),_SCS("is_enabler_enabled"), ENABLER_FREEZE_BODIES);
+	ADD_PROPERTYI( PropertyInfo(Variant::BOOL,"enabler/pause_particles"),_SCS("set_enabler"),_SCS("is_enabler_enabled"), ENABLER_PAUSE_PARTICLES);
 
 	BIND_CONSTANT( ENABLER_FREEZE_BODIES );
 	BIND_CONSTANT( ENABLER_PAUSE_ANIMATIONS );
+	BIND_CONSTANT( ENABLER_PAUSE_PARTICLES );
 	BIND_CONSTANT( ENABLER_MAX);
 }
 
@@ -319,4 +340,5 @@ VisibilityEnabler2D::VisibilityEnabler2D() {
 	visible=false;
 
 }
+
 

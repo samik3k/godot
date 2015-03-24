@@ -37,6 +37,7 @@
 #include "scene/main/scene_main_loop.h"
 
 
+class Viewport;
 class Node : public Object {
 
 	OBJ_TYPE( Node, Object );
@@ -79,8 +80,13 @@ private:
 		int depth;
 		int blocked; // safeguard that throws an error when attempting to modify the tree in a harmful way while being traversed.
 		StringName name;
-		SceneMainLoop *scene;
-		bool inside_scene;
+		SceneTree *tree;
+		bool inside_tree;
+#ifdef TOOLS_ENABLED
+		NodePath import_path; //path used when imported, used by scene editors to keep tracking
+#endif
+
+		Viewport *viewport;
 
 				
 		HashMap< StringName, GroupData,StringNameHasher>  grouped;
@@ -95,6 +101,7 @@ private:
 
 		bool input;
 		bool unhandled_input;
+		bool unhandled_key_input;
 
 		bool parent_owned;
 		bool in_constructor;
@@ -111,9 +118,9 @@ private:
 
 	void _propagate_reverse_notification(int p_notification);	
 	void _propagate_deferred_notification(int p_notification, bool p_reverse);
-	void _propagate_enter_scene();
+	void _propagate_enter_tree();
 	void _propagate_ready();
-	void _propagate_exit_scene();
+	void _propagate_exit_tree();
 	void _propagate_validate_owner();
 	void _print_stray_nodes();
 	void _propagate_pause_owner(Node*p_owner);
@@ -121,10 +128,11 @@ private:
 
 	void _duplicate_and_reown(Node* p_new_parent, const Map<Node*,Node*>& p_reown_map) const;
 	Array _get_children() const;
+	Array _get_groups() const;
 
-friend class SceneMainLoop;
+friend class SceneTree;
 
-	void _set_scene(SceneMainLoop *p_scene);
+	void _set_tree(SceneTree *p_tree);
 protected:
 
 	void _block() { data.blocked++; }
@@ -134,6 +142,7 @@ protected:
 	
 	virtual void add_child_notify(Node *p_child);
 	virtual void remove_child_notify(Node *p_child);
+	virtual void move_child_notify(Node *p_child);
 	void remove_and_delete_child(Node *p_child);
 	
 	void _propagate_replace_owner(Node *p_owner,Node* p_by_owner); 
@@ -150,8 +159,8 @@ public:
 
 	enum {
 		// you can make your own, but don't use the same numbers as other notifications in other nodes
-		NOTIFICATION_ENTER_SCENE=10,
-		NOTIFICATION_EXIT_SCENE =11,
+		NOTIFICATION_ENTER_TREE=10,
+		NOTIFICATION_EXIT_TREE =11,
 		NOTIFICATION_MOVED_IN_PARENT =12,
 		NOTIFICATION_READY=13,
 		//NOTIFICATION_PARENT_DECONFIGURED =15, - it's confusing, it's going away
@@ -179,9 +188,9 @@ public:
 	Node *get_node_and_resource(const NodePath& p_path,RES& r_res) const;
 	
 	Node *get_parent() const;
-	_FORCE_INLINE_ SceneMainLoop *get_scene() const { ERR_FAIL_COND_V( !data.scene, NULL ); return data.scene; }
+	_FORCE_INLINE_ SceneTree *get_tree() const { ERR_FAIL_COND_V( !data.tree, NULL ); return data.tree; }
 
-	_FORCE_INLINE_ bool is_inside_scene() const { return data.inside_scene; }
+	_FORCE_INLINE_ bool is_inside_tree() const { return data.inside_tree; }
 	
 	bool is_a_parent_of(const Node *p_node) const;
 	bool is_greater_than(const Node *p_node) const;
@@ -237,6 +246,9 @@ public:
 	void set_process_unhandled_input(bool p_enable);
 	bool is_processing_unhandled_input() const;
 
+	void set_process_unhandled_key_input(bool p_enable);
+	bool is_processing_unhandled_key_input() const;
+
 	int get_position_in_parent() const;
 
 	Node *duplicate() const;
@@ -260,6 +272,21 @@ public:
 	static void print_stray_nodes();
 
 	void queue_delete();
+
+//shitty hacks for speed
+	static void set_human_readable_collision_renaming(bool p_enabled);
+	static void init_node_hrcr();
+
+	void force_parent_owned() { data.parent_owned=true; } //hack to avoid duplicate nodes
+
+#ifdef TOOLS_ENABLED
+	void set_import_path(const NodePath& p_import_path); //path used when imported, used by scene editors to keep tracking
+	NodePath get_import_path() const;
+#endif
+
+	void get_argument_options(const StringName& p_function,int p_idx,List<String>*r_options) const;
+
+	_FORCE_INLINE_ Viewport *get_viewport() const { return data.viewport; }
 
 	/* CANVAS */
 

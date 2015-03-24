@@ -65,10 +65,11 @@ protected:
 	};
 
 	int last_order;
-	HashMap<String,VariantContainer> props;
+	Map<StringName,VariantContainer> props;
 	String resource_path;
-	HashMap<String,PropertyInfo> custom_prop_info;
+	Map<StringName,PropertyInfo> custom_prop_info;
 	bool disable_platform_override;
+	bool using_datapack;
 
 	
 	bool _set(const StringName& p_name, const Variant& p_value);
@@ -109,7 +110,7 @@ public:
 	int get_order(const String& p_name) const;
 	void set_order(const String& p_name, int p_order);
 	
-	Error setup(const String& p_path);
+	Error setup(const String& p_path, const String &p_main_pack);
 
 	Error save_custom(const String& p_path="",const CustomMap& p_custom=CustomMap(),const Set<String>& p_ignore_masks=Set<String>());
 	Error save();
@@ -126,6 +127,8 @@ public:
 	Object* get_singleton_object(const String& p_name) const;
 
 	void register_global_defaults();
+
+	bool is_using_datapack() const;
 
 	Globals();	
 	~Globals();

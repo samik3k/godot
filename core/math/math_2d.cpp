@@ -74,6 +74,11 @@ float Vector2::distance_squared_to(const Vector2& p_vector2) const {
 
 float Vector2::angle_to(const Vector2& p_vector2) const  {
 	
+	return Math::atan2( tangent().dot(p_vector2), dot(p_vector2) );
+}
+
+float Vector2::angle_to_point(const Vector2& p_vector2) const  {
+
 	return Math::atan2( x-p_vector2.x, y - p_vector2.y );
 }
 
@@ -252,6 +257,16 @@ Vector2 Vector2::cubic_interpolate(const Vector2& p_b,const Vector2& p_pre_a, co
 		(a * p_a.y) + (b *p_b.y) + (c * p_pre_a.y) + (d * p_post_b.y)
 	);
 */
+
+}
+
+Vector2 Vector2::slide(const Vector2& p_vec) const {
+
+	return p_vec - *this * this->dot(p_vec);
+}
+Vector2 Vector2::reflect(const Vector2& p_vec) const {
+
+	return p_vec - *this * this->dot(p_vec) * 2.0;
 
 }
 
@@ -584,6 +599,10 @@ Matrix32 Matrix32::rotated(float p_phi) const {
 
 }
 
+float Matrix32::basis_determinant() const {
+
+	return elements[0].x * elements[1].y - elements[0].y * elements[1].x;
+}
 
 Matrix32 Matrix32::interpolate_with(const Matrix32& p_transform, float p_c) const {
 

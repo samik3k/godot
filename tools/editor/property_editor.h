@@ -92,7 +92,7 @@ class CustomPropertyEditor : public Popup {
 	ColorPicker *color_picker;
 	TextEdit *text_edit;
 	bool read_only;
-	CheckButton *checks20[20];
+	Button *checks20[20];
 
 
 	Control *easing_draw;
@@ -105,6 +105,8 @@ class CustomPropertyEditor : public Popup {
 	void _file_selected(String p_file);
 	void _scroll_modified(double p_value);
 	void _modified(String p_string);
+	void _focus_enter();
+	void _focus_exit();
 	void _action_pressed(int p_which);
 	void _type_create_selected(int p_idx);
 
@@ -154,6 +156,7 @@ class PropertyEditor : public Control {
 	bool keying;
 	bool read_only;
 	bool show_categories;
+	float refresh_countdown;
 
 	HashMap<String,String> pending;
 	String selected_property;
@@ -183,6 +186,7 @@ class PropertyEditor : public Control {
 	void _draw_flags(Object *ti,const Rect2& p_rect);
 
 	Node *get_instanced_node();
+	void _refresh_item(TreeItem *p_item);
 
 	UndoRedo *undo_redo;
 protected:
@@ -195,11 +199,13 @@ public:
 
 	String get_selected_path() const;
 
-	Tree *get_tree();
+	Tree *get_scene_tree();
 	Label* get_top_label();
 	void hide_top_label();
 	void update_tree();
 	void update_property(const String& p_prop);
+
+	void refresh();
 
 	void edit(Object* p_object);
 

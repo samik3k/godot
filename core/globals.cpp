@@ -166,10 +166,9 @@ bool Globals::_get(const StringName& p_name,Variant &r_ret) const {
 
 	_THREAD_SAFE_METHOD_
 
-	const VariantContainer *v=props.getptr(p_name);
-	if (!v)
+	if (!props.has(p_name))
 		return false;
-	r_ret=v->variant;
+	r_ret=props[p_name].variant;
 	return true;
 	
 }
@@ -188,18 +187,17 @@ void Globals::_get_property_list(List<PropertyInfo> *p_list) const {
 	
 	_THREAD_SAFE_METHOD_
 
-	const String *k=NULL;
 	Set<_VCSort> vclist;
 	
-	while ((k=props.next(k))) {
+	for(Map<StringName,VariantContainer>::Element *E=props.front();E;E=E->next()) {
 		
-		const VariantContainer *v=props.getptr(*k);
+		const VariantContainer *v=&E->get();
 
 		if (v->hide_from_editor)
 			continue;
 
 		_VCSort vc;
-		vc.name=*k;
+		vc.name=E->key();
 		vc.order=v->order;
 		vc.type=v->variant.get_type();
 		if (vc.name.begins_with("input/") || vc.name.begins_with("import/") || vc.name.begins_with("export/") || vc.name.begins_with("/remap") || vc.name.begins_with("/locale") || vc.name.begins_with("/autoload"))
@@ -240,15 +238,31 @@ bool Globals::_load_resource_pack(const String& p_pack) {
 
 	//if data.pck is found, all directory access will be from here
 	DirAccess::make_default<DirAccessPack>(DirAccess::ACCESS_RESOURCES);
+	using_datapack=true;
 
 	return true;
 }
 
-Error Globals::setup(const String& p_path) {
+Error Globals::setup(const String& p_path,const String & p_main_pack) {
 
 	//an absolute mess of a function, must be cleaned up and reorganized somehow at some point
 	
 	//_load_settings(p_path+"/override.cfg");
+
+	if (p_main_pack!="") {
+
+		bool ok = _load_resource_pack(p_main_pack);
+		ERR_FAIL_COND_V(!ok,ERR_CANT_OPEN);
+
+		if (_load_settings("res://engine.cfg")==OK || _load_settings_binary("res://engine.cfb")==OK) {
+
+			_load_settings("res://override.cfg");
+
+		}
+
+		return OK;
+
+	}
 
 	if (OS::get_singleton()->get_executable_path()!="") {
 
@@ -319,11 +333,13 @@ Error Globals::setup(const String& p_path) {
 		String candidate = d->get_current_dir();
 		String current_dir = d->get_current_dir();
 		bool found = false;
+		bool first_time=true;
 
 		while(true) {
 			//try to load settings in ascending through dirs shape!
 
-			if (_load_resource_pack(current_dir+"/data.pck") || _load_resource_pack(current_dir+"/data.pcz")) {
+			//tries to open pack, but only first time
+			if (first_time && _load_resource_pack(current_dir+"/data.pck")) {
 				if (_load_settings("res://engine.cfg")==OK || _load_settings_binary("res://engine.cfb")==OK) {
 
 					_load_settings("res://override.cfg");
@@ -344,6 +360,7 @@ Error Globals::setup(const String& p_path) {
 			if (d->get_current_dir()==current_dir)
 				break; //not doing anything useful
 			current_dir=d->get_current_dir();
+			first_time=false;
 		}
 
 
@@ -549,9 +566,11 @@ static Variant _decode_variant(const String& p_string) {
 		ERR_FAIL_COND_V(params.size()!=1 && params.size()!=2,Variant());
 		int scode=0;
 
-		if (params[0].is_numeric())
+		if (params[0].is_numeric()) {
 			scode=params[0].to_int();
-		else
+			if (scode<10)
+				scode+=KEY_0;
+		} else
 			scode=find_keycode(params[0]);
 
 		InputEvent ie;
@@ -655,7 +674,7 @@ static Variant _decode_variant(const String& p_string) {
 		int w=params[2].to_int();
 		int h=params[3].to_int();
 
-		if (w == 0 && w == 0) {
+		if (w == 0 && h == 0) {
 			//r_v = Image(w, h, imgformat);
 			return Image();
 		};
@@ -1134,24 +1153,23 @@ Error Globals::save_custom(const String& p_path,const CustomMap& p_custom,const 
 
 	ERR_FAIL_COND_V(p_path=="",ERR_INVALID_PARAMETER);
 
-	const String *k=NULL;
 	Set<_VCSort> vclist;
 
-	while ((k=props.next(k))) {
+	for(Map<StringName,VariantContainer>::Element *G=props.front();G;G=G->next()) {
 
-		const VariantContainer *v=props.getptr(*k);
+		const VariantContainer *v=&G->get();
 
 		if (v->hide_from_editor)
 			continue;
 
-		if (p_custom.has(*k))
+		if (p_custom.has(G->key()))
 			continue;
 
 		bool discard=false;
 
 		for(const Set<String>::Element *E=p_ignore_masks.front();E;E=E->next()) {
 
-			if ( (*k).match(E->get())) {
+			if ( String(G->key()).match(E->get())) {
 				discard=true;
 				break;
 			}
@@ -1161,7 +1179,7 @@ Error Globals::save_custom(const String& p_path,const CustomMap& p_custom,const 
 			continue;
 
 		_VCSort vc;
-		vc.name=*k;
+		vc.name=G->key();//*k;
 		vc.order=v->order;
 		vc.type=v->variant.get_type();
 		vc.flags=PROPERTY_USAGE_CHECKABLE|PROPERTY_USAGE_EDITOR|PROPERTY_USAGE_STORAGE;
@@ -1324,6 +1342,10 @@ void Globals::set_disable_platform_override(bool p_disable) {
 	disable_platform_override=p_disable;
 }
 
+bool Globals::is_using_datapack() const {
+
+	return using_datapack;
+}
 
 void Globals::_bind_methods() {
 
@@ -1338,6 +1360,7 @@ void Globals::_bind_methods() {
 	ObjectTypeDB::bind_method(_MD("save"),&Globals::save);
 	ObjectTypeDB::bind_method(_MD("has_singleton"),&Globals::has_singleton);
 	ObjectTypeDB::bind_method(_MD("get_singleton"),&Globals::get_singleton_object);
+	ObjectTypeDB::bind_method(_MD("load_resource_pack"),&Globals::_load_resource_pack);
 }
 
 Globals::Globals() {
@@ -1359,6 +1382,8 @@ Globals::Globals() {
 	set("application/name","" );
 	set("application/main_scene","");
 	custom_prop_info["application/main_scene"]=PropertyInfo(Variant::STRING,"application/main_scene",PROPERTY_HINT_FILE,"xml,res,scn,xscn");
+	set("application/disable_stdout",false);
+	set("application/use_shared_user_dir",true);
 
 
 	key.key.scancode=KEY_RETURN;
@@ -1436,6 +1461,8 @@ Globals::Globals() {
 	custom_prop_info["render/mipmap_policy"]=PropertyInfo(Variant::INT,"render/mipmap_policy",PROPERTY_HINT_ENUM,"Allow,Allow For Po2,Disallow");
 	custom_prop_info["render/thread_model"]=PropertyInfo(Variant::INT,"render/thread_model",PROPERTY_HINT_ENUM,"Single-Unsafe,Single-Safe,Multi-Threaded");
 	set("display/emulate_touchscreen",false);
+
+	using_datapack=false;
 }
 
 

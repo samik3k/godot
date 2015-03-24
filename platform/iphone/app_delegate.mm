@@ -33,12 +33,18 @@
 #include "core/globals.h"
 #include "main/main.h"
 
-#ifdef FACEBOOK_ENABLED
+#ifdef MODULE_FACEBOOKSCORER_IOS_ENABLED
 #include "modules/FacebookScorer_ios/FacebookScorer.h"
 #endif
 
+#ifdef MODULE_GAME_ANALYTICS_ENABLED
+#import "modules/game_analytics/ios/MobileAppTracker.framework/Headers/MobileAppTracker.h"
+//#import "modules/game_analytics/ios/MobileAppTracker.h"
+#import <AdSupport/AdSupport.h>
+#endif
+
 #define kFilteringFactor                        0.1
-#define kRenderingFrequency						30
+#define kRenderingFrequency						60
 #define kAccelerometerFrequency         100.0 // Hz
 
 #ifdef APPIRATER_ENABLED
@@ -59,6 +65,8 @@ Error _shell_open(String p_uri) {
 
 @implementation AppDelegate
 
+@synthesize window;
+
 extern int gargc;
 extern char** gargv;
 extern int iphone_main(int, int, int, char**);
@@ -76,13 +84,11 @@ static int frame_count = 0;
 	switch (frame_count) {
 
 	case 0: {
-
-		int backingWidth;
-		int backingHeight;
-		glGetRenderbufferParameterivOES(GL_RENDERBUFFER_OES, GL_RENDERBUFFER_WIDTH_OES, &backingWidth);
-		glGetRenderbufferParameterivOES(GL_RENDERBUFFER_OES, GL_RENDERBUFFER_HEIGHT_OES, &backingHeight);
-
-		iphone_main(backingWidth, backingHeight, gargc, gargv);
+        int backingWidth;
+        int backingHeight;
+        glGetRenderbufferParameterivOES(GL_RENDERBUFFER_OES, GL_RENDERBUFFER_WIDTH_OES, &backingWidth);
+        glGetRenderbufferParameterivOES(GL_RENDERBUFFER_OES, GL_RENDERBUFFER_HEIGHT_OES, &backingHeight);
+		
 
 		OS::VideoMode vm;
 		vm.fullscreen = true;
@@ -108,13 +114,20 @@ static int frame_count = 0;
 		if ([[UIDevice currentDevice]respondsToSelector:@selector(identifierForVendor)]) {
 			uuid = [UIDevice currentDevice].identifierForVendor.UUIDString;
 		}else{
-			// return [UIDevice currentDevice]. uniqueIdentifier
-			uuid = [[UIDevice currentDevice] performSelector:@selector(uniqueIdentifier)];
+
+			// before iOS 6, so just generate an identifier and store it
+			uuid = [[NSUserDefaults standardUserDefaults] objectForKey:@"identiferForVendor"];
+			if( !uuid ) {
+				CFUUIDRef cfuuid = CFUUIDCreate(NULL);
+				uuid = (__bridge_transfer NSString*)CFUUIDCreateString(NULL, cfuuid);
+				CFRelease(cfuuid);
+				[[NSUserDefaults standardUserDefaults] setObject:uuid forKey:@"identifierForVendor"];
+			}
 		}
 
 		OSIPhone::get_singleton()->set_unique_ID(String::utf8([uuid UTF8String]));
 
-	}; // break;
+	}; break;
 /*
 	case 1: {
 		++frame_count;
@@ -141,7 +154,7 @@ static int frame_count = 0;
 		[Appirater appLaunched:YES app_id:aid];
 		#endif
 
-	}; //  break; fallthrough
+	}; break; // no fallthrough
 
 	default: {
 
@@ -158,6 +171,7 @@ static int frame_count = 0;
 - (void)applicationDidReceiveMemoryWarning:(UIApplication *)application {
 
 	printf("****************** did receive memory warning!\n");
+	OS::get_singleton()->get_main_loop()->notification(MainLoop::NOTIFICATION_OS_MEMORY_WARNING);
 };
 
 - (void)applicationDidFinishLaunching:(UIApplication*)application {
@@ -165,7 +179,7 @@ static int frame_count = 0;
 	printf("**************** app delegate init\n");
 	CGRect rect = [[UIScreen mainScreen] bounds];
 
-	application.statusBarHidden = YES;
+	[application setStatusBarHidden:YES withAnimation:UIStatusBarAnimationNone];
 	// disable idle timer
 	application.idleTimerDisabled = YES;
 
@@ -182,6 +196,13 @@ static int frame_count = 0;
 	//glView.autoresizesSubviews = YES;
 	//[glView setAutoresizingMask:UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleWidth];
 
+    int backingWidth;
+    int backingHeight;
+    glGetRenderbufferParameterivOES(GL_RENDERBUFFER_OES, GL_RENDERBUFFER_WIDTH_OES, &backingWidth);
+    glGetRenderbufferParameterivOES(GL_RENDERBUFFER_OES, GL_RENDERBUFFER_HEIGHT_OES, &backingHeight);
+    
+    iphone_main(backingWidth, backingHeight, gargc, gargv);
+    
 	view_controller = [[ViewController alloc] init];
 	view_controller.view = glView;
 	window.rootViewController = view_controller;
@@ -202,7 +223,36 @@ static int frame_count = 0;
 	//OSIPhone::screen_width = rect.size.width - rect.origin.x;
 	//OSIPhone::screen_height = rect.size.height - rect.origin.y;
 	
-	mainViewController = view_controller;	
+	mainViewController = view_controller;
+    
+#ifdef MODULE_GAME_ANALYTICS_ENABLED
+    printf("********************* didFinishLaunchingWithOptions\n");
+    if(!Globals::get_singleton()->has("mobileapptracker/advertiser_id"))
+    {
+        return;
+    }
+    if(!Globals::get_singleton()->has("mobileapptracker/conversion_key"))
+    {
+        return;
+    }
+        
+    String adid = GLOBAL_DEF("mobileapptracker/advertiser_id","");
+    String convkey = GLOBAL_DEF("mobileapptracker/conversion_key","");
+        
+    NSString * advertiser_id = [NSString stringWithUTF8String:adid.utf8().get_data()];
+    NSString * conversion_key = [NSString stringWithUTF8String:convkey.utf8().get_data()];
+        
+    // Account Configuration info - must be set
+    [MobileAppTracker initializeWithMATAdvertiserId:advertiser_id
+                                    MATConversionKey:conversion_key];
+        
+    // Used to pass us the IFA, enables highly accurate 1-to-1 attribution.
+    // Required for many advertising networks.
+    [MobileAppTracker setAppleAdvertisingIdentifier:[[ASIdentifierManager sharedManager] advertisingIdentifier]
+        advertisingTrackingEnabled:[[ASIdentifierManager sharedManager] isAdvertisingTrackingEnabled]];
+        
+#endif
+    
 };
 
 - (void)applicationWillTerminate:(UIApplication*)application {
@@ -214,25 +264,41 @@ static int frame_count = 0;
 - (void)applicationDidEnterBackground:(UIApplication *)application
 {
 	printf("********************* did enter background\n");
+	if (OS::get_singleton()->get_main_loop())
+		OS::get_singleton()->get_main_loop()->notification(MainLoop::NOTIFICATION_WM_FOCUS_OUT);
 	[view_controller.view stopAnimation];
+	if (OS::get_singleton()->native_video_is_playing()) {
+		OSIPhone::get_singleton()->native_video_focus_out();
+	};
 }
 
 - (void)applicationWillEnterForeground:(UIApplication *)application
 {
 	printf("********************* did enter foreground\n");
+	//OS::get_singleton()->get_main_loop()->notification(MainLoop::NOTIFICATION_WM_FOCUS_IN);
 	[view_controller.view startAnimation];
 }
 
 - (void) applicationWillResignActive:(UIApplication *)application
 {
 	printf("********************* will resign active\n");
+	//OS::get_singleton()->get_main_loop()->notification(MainLoop::NOTIFICATION_WM_FOCUS_OUT);
 	[view_controller.view stopAnimation]; // FIXME: pause seems to be recommended elsewhere
 }
 
 - (void) applicationDidBecomeActive:(UIApplication *)application
 {
 	printf("********************* did become active\n");
+#ifdef MODULE_GAME_ANALYTICS_ENABLED
+    printf("********************* mobile app tracker found\n");
+	[MobileAppTracker measureSession];
+#endif
+	if (OS::get_singleton()->get_main_loop())
+		OS::get_singleton()->get_main_loop()->notification(MainLoop::NOTIFICATION_WM_FOCUS_IN);
 	[view_controller.view startAnimation]; // FIXME: resume seems to be recommended elsewhere
+	if (OSIPhone::get_singleton()->native_video_is_playing()) {
+		OSIPhone::get_singleton()->native_video_unpause();
+	};
 }
 
 - (void)accelerometer:(UIAccelerometer*)accelerometer didAccelerate:(UIAcceleration*)acceleration {
@@ -243,7 +309,7 @@ static int frame_count = 0;
 }
 
 - (BOOL)application:(UIApplication *)application handleOpenURL:(NSURL *)url {
-#ifdef FACEBOOK_ENABLED
+#ifdef MODULE_FACEBOOKSCORER_IOS_ENABLED
 	return [[[FacebookScorer sharedInstance] facebook] handleOpenURL:url];
 #else
 	return false;
@@ -252,7 +318,7 @@ static int frame_count = 0;
 
 // For 4.2+ support
 - (BOOL)application:(UIApplication *)application openURL:(NSURL *)url sourceApplication:(NSString *)sourceApplication annotation:(id)annotation {
-#ifdef FACEBOOK_ENABLED
+#ifdef MODULE_FACEBOOKSCORER_IOS_ENABLED
 	return [[[FacebookScorer sharedInstance] facebook] handleOpenURL:url];
 #else
 	return false;

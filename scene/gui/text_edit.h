@@ -63,6 +63,7 @@ class TextEdit : public Control  {
 		int from_line,from_column;
 		int to_line,to_column;
 
+		bool shiftclick_left;
 
 	} selection;
 
@@ -79,6 +80,7 @@ class TextEdit : public Control  {
 		Color mark_color;
 		Color breakpoint_color;
 		Color current_line_color;
+		Color brace_mismatch_color;
 
 		int row_height;
 		int line_spacing;
@@ -138,7 +140,7 @@ class TextEdit : public Control  {
 		int size() const { return text.size(); }
 		void clear();
 		void clear_caches();
-		_FORCE_INLINE_ const String& operator[](int p_line) const { return text[p_line].data; }
+        _FORCE_INLINE_ const String& operator[](int p_line) const { return text[p_line].data; }
 		Text() { tab_size=4; }
        };
 
@@ -162,7 +164,7 @@ class TextEdit : public Control  {
 	TextOperation current_op;
 
 	List<TextOperation> undo_stack;
-	List<TextOperation>::Element *undo_stack_pos;
+    List<TextOperation>::Element *undo_stack_pos;
 
 	void _clear_redo();
 	void _do_text_op(const TextOperation& p_op, bool p_reverse);
@@ -185,6 +187,8 @@ class TextEdit : public Control  {
 	int completion_index;
 	Rect2i completion_rect;
 	int completion_line_ofs;
+	String completion_hint;
+	int completion_hint_offset;
 
 	bool setting_text;
 
@@ -206,6 +210,10 @@ class TextEdit : public Control  {
 	bool text_changed_dirty;
 	bool undo_enabled;
 	bool line_numbers;
+	
+	bool auto_brace_completion_enabled;
+	bool brace_matching_enabled;
+	bool cut_copy_line;
 
 	uint64_t last_dblclk;
 
@@ -218,6 +226,8 @@ class TextEdit : public Control  {
 	Object *tooltip_obj;
 	StringName tooltip_func;
 	Variant tooltip_ud;
+	
+	bool next_operation_is_complex;
 
 	int get_visible_rows() const;
 
@@ -241,11 +251,13 @@ class TextEdit : public Control  {
 	void _update_caches();
 	void _cursor_changed_emit();
 	void _text_changed_emit();
-
+	
+	void _begin_compex_operation();
+	void _end_compex_operation();
 	void _push_current_op();
 
 	/* super internal api, undo/redo builds on it */
-
+	
 	void _base_insert_text(int p_line, int p_column,const String& p_text,int &r_end_line,int &r_end_column);
 	String _base_get_text(int p_from_line, int p_from_column,int p_to_line,int p_to_column) const;
 	void _base_remove_text(int p_from_line, int p_from_column,int p_to_line,int p_to_column);
@@ -254,6 +266,7 @@ class TextEdit : public Control  {
 
 	void _clear();
 	void _cancel_completion();
+	void _cancel_code_hint();
 	void _confirm_completion();
 	void _update_completion_candidates();
 
@@ -262,12 +275,16 @@ class TextEdit : public Control  {
 protected:
 
 	virtual String get_tooltip(const Point2& p_pos) const;
-
+	
 	void _insert_text(int p_line, int p_column,const String& p_text,int *r_end_line=NULL,int *r_end_char=NULL);
 	void _remove_text(int p_from_line, int p_from_column,int p_to_line,int p_to_column);
 	void _insert_text_at_cursor(const String& p_text);
 	void _input_event(const InputEvent& p_input);
 	void _notification(int p_what);
+	
+	void _consume_pair_symbol(CharType ch);
+	void _consume_backspace_for_pair_symbol(int prev_line, int prev_column);
+	
 	static void _bind_methods();
 
 
@@ -280,12 +297,15 @@ public:
 		SEARCH_WHOLE_WORDS=2,
 		SEARCH_BACKWARDS=4
 	};
+	
+	virtual CursorShape get_cursor_shape(const Point2& p_pos=Point2i()) const;
 
 	//void delete_char();
 	//void delete_line();
 
 	void set_text(String p_text);
 	void insert_text_at_cursor(const String& p_text);
+    void insert_at(const String& p_text, int at);
 	int get_line_count() const;
 	void set_line_as_marked(int p_line,bool p_marked);
 	void set_line_as_breakpoint(int p_line,bool p_breakpoint);
@@ -293,8 +313,16 @@ public:
 	void get_breakpoints(List<int> *p_breakpoints) const;
 	String get_text();
 	String get_line(int line) const;
+    void set_line(int line, String new_text);
 	void backspace_at_cursor();
-
+	
+	inline void set_auto_brace_completion(bool p_enabled) {
+		auto_brace_completion_enabled = p_enabled;
+	}
+	inline void set_brace_matching(bool p_enabled) {
+		brace_matching_enabled=p_enabled;
+		update();
+	}
 
 	void cursor_set_column(int p_col);
 	void cursor_set_line(int p_row);
@@ -321,10 +349,12 @@ public:
 
 	bool is_selection_active() const;
 	int get_selection_from_line() const;
-	int get_selection_from_column() const;
+    int get_selection_from_column() const;
 	int get_selection_to_line() const;
 	int get_selection_to_column() const;
 	String get_selection_text() const;
+
+	String get_word_under_cursor() const;
 
 	bool search(const String &p_key,uint32_t p_search_flags, int p_from_line, int p_from_column,int &r_line,int &r_column) const;
 
@@ -356,9 +386,12 @@ public:
 
 	void set_tooltip_request_func(Object *p_obj, const StringName& p_function, const Variant& p_udata);
 
-	void set_completion(bool p_enabled,const Vector<String>& p_prefixes);
+	void set_completion(bool p_enabled,const Vector<String>& p_prefixes);	
 	void code_complete(const Vector<String> &p_strings);
+	void set_code_hint(const String& p_hint);
 	void query_code_comple();
+
+	String get_text_for_completion();
 
 	TextEdit();
 	~TextEdit();

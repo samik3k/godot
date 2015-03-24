@@ -142,7 +142,7 @@ void EditorFileSystemDirectory::_bind_methods() {
 	ObjectTypeDB::bind_method(_MD("get_file","idx"),&EditorFileSystemDirectory::get_file);
 	ObjectTypeDB::bind_method(_MD("get_file_path","idx"),&EditorFileSystemDirectory::get_file_path);
 	ObjectTypeDB::bind_method(_MD("get_file_types","idx"),&EditorFileSystemDirectory::get_file_type);
-	ObjectTypeDB::bind_method(_MD("is_missing_sources","idx"),&EditorFileSystemDirectory::get_file_type);
+	ObjectTypeDB::bind_method(_MD("is_missing_sources","idx"),&EditorFileSystemDirectory::is_missing_sources);
 	ObjectTypeDB::bind_method(_MD("get_name"),&EditorFileSystemDirectory::get_name);
 	ObjectTypeDB::bind_method(_MD("get_parent"),&EditorFileSystemDirectory::get_parent);
 
@@ -227,7 +227,7 @@ EditorFileSystem::DirItem* EditorFileSystem::_scan_dir(DirAccess *da,Set<String>
 	DirCache *dc = dir_cache.getptr(path);
 
 
-	if (dc && dc->modification_time==mtime) {
+	if (false && dc && dc->modification_time==mtime) {
 		//use the cached files, since directory did not change
 		for (Set<String>::Element *E=dc->subdirs.front();E;E=E->next()) {
 			dirs.push_back(E->get());
@@ -542,6 +542,7 @@ bool EditorFileSystem::_check_meta_sources(EditorFileSystemDirectory::ImportMeta
 
 		for(int j=0;j<p_meta.sources.size();j++) {
 
+
 			String src = EditorImportPlugin::expand_source_path(p_meta.sources[j].path);
 
 			if (!FileAccess::exists(src)) {
@@ -556,6 +557,7 @@ bool EditorFileSystem::_check_meta_sources(EditorFileSystemDirectory::ImportMeta
 			if (mt!=p_meta.sources[j].modified_time) {
 				//scan
 				String md5 = FileAccess::get_md5(src);
+				print_line("checking: "+src);
 				print_line("md5: "+md5);
 				print_line("vs: "+p_meta.sources[j].md5);
 				if (md5!=p_meta.sources[j].md5) {
@@ -628,7 +630,7 @@ void EditorFileSystem::scan_sources() {
 		s.priority=Thread::PRIORITY_LOW;
 		thread_sources = Thread::create(_thread_func_sources,this,s);
 		//tree->hide();
-		print_line("SCAN BEGIN!");
+		//print_line("SCAN BEGIN!");
 		//progress->show();
 	}
 
@@ -679,12 +681,12 @@ void EditorFileSystem::_notification(int p_what) {
 
 	switch(p_what) {
 
-		case NOTIFICATION_ENTER_SCENE: {
+		case NOTIFICATION_ENTER_TREE: {
 
 			_load_type_cache();
 			    scan();
 		} break;
-		case NOTIFICATION_EXIT_SCENE: {
+		case NOTIFICATION_EXIT_TREE: {
 			if (use_threads && thread) {
 				//abort thread if in progress
 				abort_scan=true;
@@ -722,7 +724,7 @@ void EditorFileSystem::_notification(int p_what) {
 						Thread::wait_to_finish(thread_sources);
 						memdelete(thread_sources);
 						thread_sources=NULL;
-						print_line("sources changed: "+itos(sources_changed.size()));
+						//print_line("sources changed: "+itos(sources_changed.size()));
 						emit_signal("sources_changed",sources_changed.size()>0);
 					}
 				} else if (!scanning) {
@@ -746,7 +748,7 @@ void EditorFileSystem::_notification(int p_what) {
 					thread=NULL;
 					emit_signal("filesystem_changed");
 					emit_signal("sources_changed",sources_changed.size()>0);
-					print_line("initial sources changed: "+itos(sources_changed.size()));
+					//print_line("initial sources changed: "+itos(sources_changed.size()));
 
 
 
@@ -988,6 +990,35 @@ EditorFileSystemDirectory *EditorFileSystem::get_path(const String& p_path) {
 void EditorFileSystem::_resource_saved(const String& p_path){
 
 	EditorFileSystem::get_singleton()->update_file(p_path);
+}
+
+String EditorFileSystem::_find_first_from_source(EditorFileSystemDirectory* p_dir,const String &p_src) const {
+
+	for(int i=0;i<p_dir->files.size();i++) {
+		for(int j=0;j<p_dir->files[i].meta.sources.size();j++) {
+
+			if (p_dir->files[i].meta.sources[j].path==p_src)
+				return p_dir->get_file_path(i);
+		}
+	}
+
+	for(int i=0;i<p_dir->subdirs.size();i++) {
+
+		String ret = _find_first_from_source(p_dir->subdirs[i],p_src);
+		if (ret.length()>0)
+			return ret;
+	}
+
+	return String();
+}
+
+
+String EditorFileSystem::find_resource_from_source(const String& p_path) const {
+
+
+	if (filesystem)
+		return _find_first_from_source(filesystem,p_path);
+	return String();
 }
 
 void EditorFileSystem::update_file(const String& p_file) {

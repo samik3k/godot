@@ -32,10 +32,10 @@ void VideoPlayer::_notification(int p_notification) {
 
 	switch (p_notification) {
 
-		case NOTIFICATION_ENTER_SCENE: {
+		case NOTIFICATION_ENTER_TREE: {
 
 			//set_idle_process(false); //don't annoy
-			if (stream.is_valid() && autoplay && !get_scene()->is_editor_hint())
+			if (stream.is_valid() && autoplay && !get_tree()->is_editor_hint())
 				play();
 		} break;
 
@@ -45,19 +45,15 @@ void VideoPlayer::_notification(int p_notification) {
 				return;
 			if (paused)
 				return;
+			if (!stream->is_playing())
+				return;
 
-			while (stream->get_pending_frame_count()) {
-
-				Image img = stream->pop_frame();
-				if (texture->get_width() == 0) {
-					texture->create(img.get_width(),img.get_height(),img.get_format(),Texture::FLAG_VIDEO_SURFACE|Texture::FLAG_FILTER);
-					update();
-					minimum_size_changed();
-				} else {
-
-					if (stream->get_pending_frame_count() == 0)
-						texture->set_data(img);
-				};
+			stream->update(get_tree()->get_idle_process_time());
+			int prev_width = texture->get_width();
+			stream->pop_frame(texture);
+			if (prev_width == 0) {
+				update();
+				minimum_size_changed();
 			};
 
 		} break;
@@ -104,10 +100,6 @@ void VideoPlayer::set_stream(const Ref<VideoStream> &p_stream) {
 
 	stop();
 
-	if (stream_rid.is_valid())
-		AudioServer::get_singleton()->free(stream_rid);
-	stream_rid=RID();
-
 	texture = Ref<ImageTexture>(memnew(ImageTexture));
 
 	stream=p_stream;
@@ -115,7 +107,6 @@ void VideoPlayer::set_stream(const Ref<VideoStream> &p_stream) {
 
 		stream->set_loop(loops);
 		stream->set_paused(paused);
-		stream_rid=AudioServer::get_singleton()->audio_stream_create(stream->get_audio_stream());
 	}
 
 };
@@ -127,23 +118,20 @@ Ref<VideoStream> VideoPlayer::get_stream() const {
 
 void VideoPlayer::play() {
 
-	ERR_FAIL_COND(!is_inside_scene());
+	ERR_FAIL_COND(!is_inside_tree());
 	if (stream.is_null())
 		return;
 	stream->play();
-	AudioServer::get_singleton()->stream_set_active(stream_rid,true);
-	AudioServer::get_singleton()->stream_set_volume_scale(stream_rid,volume);
 	set_process(true);
 };
 
 void VideoPlayer::stop() {
 
-	if (!is_inside_scene())
+	if (!is_inside_tree())
 		return;
 	if (stream.is_null())
 		return;
 
-	AudioServer::get_singleton()->stream_set_active(stream_rid,false);
 	stream->stop();
 	set_process(false);
 };
@@ -173,8 +161,6 @@ bool VideoPlayer::is_paused() const {
 void VideoPlayer::set_volume(float p_vol) {
 
 	volume=p_vol;
-	if (stream_rid.is_valid())
-		AudioServer::get_singleton()->stream_set_volume_scale(stream_rid,volume);
 };
 
 float VideoPlayer::get_volume() const {
@@ -206,12 +192,13 @@ String VideoPlayer::get_stream_name() const {
 	return stream->get_name();
 };
 
-float VideoPlayer::get_pos() const {
+float VideoPlayer::get_stream_pos() const {
 
 	if (stream.is_null())
 		return 0;
 	return stream->get_pos();
 };
+
 
 void VideoPlayer::set_autoplay(bool p_enable) {
 
@@ -244,7 +231,7 @@ void VideoPlayer::_bind_methods() {
 
 	ObjectTypeDB::bind_method(_MD("get_stream_name"),&VideoPlayer::get_stream_name);
 
-	ObjectTypeDB::bind_method(_MD("get_pos"),&VideoPlayer::get_pos);
+	ObjectTypeDB::bind_method(_MD("get_stream_pos"),&VideoPlayer::get_stream_pos);
 
 	ObjectTypeDB::bind_method(_MD("set_autoplay","enabled"),&VideoPlayer::set_autoplay);
 	ObjectTypeDB::bind_method(_MD("has_autoplay"),&VideoPlayer::has_autoplay);
@@ -253,7 +240,7 @@ void VideoPlayer::_bind_methods() {
 	ObjectTypeDB::bind_method(_MD("has_expand"), &VideoPlayer::has_expand );
 
 
-	ADD_PROPERTY( PropertyInfo(Variant::OBJECT, "stream/stream", PROPERTY_HINT_RESOURCE_TYPE,"AudioStream"), _SCS("set_stream"), _SCS("get_stream") );
+	ADD_PROPERTY( PropertyInfo(Variant::OBJECT, "stream/stream", PROPERTY_HINT_RESOURCE_TYPE,"VideoStream"), _SCS("set_stream"), _SCS("get_stream") );
 //	ADD_PROPERTY( PropertyInfo(Variant::BOOL, "stream/loop"), _SCS("set_loop"), _SCS("has_loop") );
 	ADD_PROPERTY( PropertyInfo(Variant::REAL, "stream/volume_db", PROPERTY_HINT_RANGE,"-80,24,0.01"), _SCS("set_volume_db"), _SCS("get_volume_db") );
 	ADD_PROPERTY( PropertyInfo(Variant::BOOL, "stream/autoplay"), _SCS("set_autoplay"), _SCS("has_autoplay") );
@@ -265,9 +252,9 @@ void VideoPlayer::_bind_methods() {
 VideoPlayer::VideoPlayer() {
 
 	volume=1;
-	loops=false;
-	paused=false;
-	autoplay=false;
+	loops = false;
+	paused = false;
+	autoplay = false;
 	expand = true;
 	loops = false;
 };

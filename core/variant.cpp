@@ -56,7 +56,7 @@ String Variant::get_type_name(Variant::Type p_type) {
 		} break;
 		case REAL: {
 
-			return "real";
+			return "float";
 
 		} break;
 		case STRING: {
@@ -298,6 +298,19 @@ bool Variant::can_convert(Variant::Type p_type_from,Variant::Type p_type_to) {
 			valid_types=valid;
 
 		} break;		
+
+		case COLOR: {
+
+			static const Type valid[] = {
+				STRING,
+				INT,
+				NIL,
+			};
+
+			valid_types = valid;
+
+		} break;
+
 		case _RID: {
 
 			static const Type valid[]={
@@ -1324,6 +1337,10 @@ Variant::operator Matrix3() const {
 
 	if (type==MATRIX3)
 		return *_data._matrix3;
+	else if (type==QUAT)
+		return *reinterpret_cast<const Quat*>(_data._mem);
+	else if (type==TRANSFORM)
+		return _data._transform->basis;
 	else
 		return Matrix3();
 }
@@ -1332,6 +1349,10 @@ Variant::operator Quat() const {
 
 	if (type==QUAT)
 		return *reinterpret_cast<const Quat*>(_data._mem);
+	else if (type==MATRIX3)
+		return 	*_data._matrix3;
+	else if (type==TRANSFORM)
+		return 	_data._transform->basis;
 	else
 		return Quat();
 }
@@ -1344,6 +1365,8 @@ Variant::operator Transform() const {
 		return *_data._transform;
 	else if (type==MATRIX3)
 		return Transform(*_data._matrix3,Vector3());
+	else if (type==QUAT)
+		return Transform(Matrix3(*reinterpret_cast<const Quat*>(_data._mem)),Vector3());
 	else
 		return Transform();
 }
@@ -2608,3 +2631,138 @@ Variant Variant::call(const StringName& p_method,VARIANT_ARG_DECLARE) {
 	return ret;
 }
 
+void Variant::construct_from_string(const String& p_string,Variant& r_value,ObjectConstruct p_obj_construct,void *p_construct_ud) {
+
+	r_value=Variant();
+}
+
+
+String Variant::get_construct_string(ObjectDeConstruct p_obj_deconstruct,void *p_deconstruct_ud) const {
+
+	switch( type ) {
+
+		case NIL: return "null";
+		case BOOL: return _data._bool ? "true" : "false";
+		case INT: return String::num(_data._int);
+		case REAL: return String::num(_data._real);
+		case STRING: return "\""+reinterpret_cast<const String*>(_data._mem)->c_escape()+"\"";
+		case VECTOR2: return "Vector2("+operator Vector2()+")";
+		case RECT2: return "Rect2("+operator Rect2()+")";
+		case MATRIX32: return "Matrix32("+operator Matrix32()+")";
+		case VECTOR3: return "Vector3("+operator Vector3()+")";
+		case PLANE: return "Plane("+operator Plane()+")";
+		//case QUAT:
+		case _AABB: return "AABB("+operator AABB()+")";
+		case QUAT: return "Quat("+operator Quat()+")";
+		case MATRIX3: return "Matrix3("+operator Matrix3()+")";
+		case TRANSFORM: return "Transform("+operator Transform()+")";
+		case NODE_PATH: return "@\""+String(operator NodePath()).c_escape()+"\"";
+		case INPUT_EVENT: return "InputEvent()";
+		case COLOR: return "Color("+String::num( operator Color().r)+","+String::num( operator Color().g)+","+String::num( operator Color().b)+","+String::num( operator Color().a)+")" ;
+		case DICTIONARY: {
+
+			const Dictionary &d =*reinterpret_cast<const Dictionary*>(_data._mem);
+			//const String *K=NULL;
+			String str="{";
+			List<Variant> keys;
+			d.get_key_list(&keys);
+
+			Vector<_VariantStrPair> pairs;
+
+			for(List<Variant>::Element *E=keys.front();E;E=E->next()) {
+
+				_VariantStrPair sp;
+				sp.key=E->get().get_construct_string(p_obj_deconstruct,p_deconstruct_ud);
+				sp.value=d[E->get()].get_construct_string(p_obj_deconstruct,p_deconstruct_ud);
+				pairs.push_back(sp);
+			}
+
+			pairs.sort();
+
+			for(int i=0;i<pairs.size();i++) {
+				if (i>0)
+					str+=", ";
+				str+="("+pairs[i].key+":"+pairs[i].value+")";
+			}
+			str+="}";
+
+			return str;
+		} break;
+		case VECTOR3_ARRAY: {
+
+			DVector<Vector3> vec = operator DVector<Vector3>();
+			String str="Vector3Array([";
+			for(int i=0;i<vec.size();i++) {
+
+				if (i>0)
+					str+=", ";
+				str+=Variant( vec[i] ).get_construct_string();
+			}
+			return str+"])";
+		} break;
+		case STRING_ARRAY: {
+
+			DVector<String> vec = operator DVector<String>();
+			String str="StringArray([";
+			for(int i=0;i<vec.size();i++) {
+
+				if (i>0)
+					str+=", ";
+				str=str+=Variant( vec[i] ).get_construct_string();
+			}
+			return str+"])";
+		} break;
+		case INT_ARRAY: {
+
+			DVector<int> vec = operator DVector<int>();
+			String str="IntArray([";
+			for(int i=0;i<vec.size();i++) {
+
+				if (i>0)
+					str+=", ";
+				str=str+itos(vec[i]);
+			}
+			return str+"])";
+		} break;
+		case REAL_ARRAY: {
+
+			DVector<real_t> vec = operator DVector<real_t>();
+			String str="FloatArray([";
+			for(int i=0;i<vec.size();i++) {
+
+				if (i>0)
+					str+=", ";
+				str=str+rtos(vec[i]);
+			}
+			return str+"])";
+		} break;
+		case ARRAY: {
+
+			Array arr = operator Array();
+			String str="[";
+			for (int i=0; i<arr.size(); i++) {
+				if (i)
+					str+=", ";
+				str += arr[i].get_construct_string(p_obj_deconstruct,p_deconstruct_ud);
+			};
+			return str+"]";
+
+		} break;
+		case OBJECT: {
+
+			if (_get_obj().obj) {
+				if (p_obj_deconstruct) {
+					return "Object(\""+p_obj_deconstruct(Variant(*this),p_deconstruct_ud).c_escape()+")";
+				} else {
+					return _get_obj().obj->get_type()+".new()";
+				}
+			} else
+				return "null";
+
+		} break;
+		default: {
+			return "["+get_type_name(type)+"]";
+		}
+	}
+
+}

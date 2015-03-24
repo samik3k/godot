@@ -28,6 +28,7 @@
 /*************************************************************************/
 #include "collision_object_2d.h"
 #include "servers/physics_2d_server.h"
+#include "scene/scene_string_names.h"
 
 void CollisionObject2D::_update_shapes_from_children() {
 
@@ -45,8 +46,12 @@ void CollisionObject2D::_notification(int p_what) {
 
 	switch(p_what) {
 
-		case NOTIFICATION_ENTER_SCENE: {
+		case NOTIFICATION_ENTER_TREE: {
 
+			if (area)
+				Physics2DServer::get_singleton()->area_set_transform(rid,get_global_transform());
+			else
+				Physics2DServer::get_singleton()->body_set_state(rid,Physics2DServer::BODY_STATE_TRANSFORM,get_global_transform());
 
 			RID space = get_world_2d()->get_space();
 			if (area) {
@@ -54,9 +59,15 @@ void CollisionObject2D::_notification(int p_what) {
 			} else
 				Physics2DServer::get_singleton()->body_set_space(rid,space);
 
+			_update_pickable();
+
 		//get space
 		}
 
+		case NOTIFICATION_VISIBILITY_CHANGED: {
+
+			_update_pickable();
+		} break;
 		case NOTIFICATION_TRANSFORM_CHANGED: {
 
 			if (area)
@@ -65,7 +76,7 @@ void CollisionObject2D::_notification(int p_what) {
 				Physics2DServer::get_singleton()->body_set_state(rid,Physics2DServer::BODY_STATE_TRANSFORM,get_global_transform());
 
 		} break;
-		case NOTIFICATION_EXIT_SCENE: {
+		case NOTIFICATION_EXIT_TREE: {
 
 			if (area) {
 				Physics2DServer::get_singleton()->area_set_space(rid,RID());
@@ -152,14 +163,65 @@ bool CollisionObject2D::_get(const StringName& p_name,Variant &r_ret) const {
 
 void CollisionObject2D::_get_property_list( List<PropertyInfo> *p_list) const {
 
-	p_list->push_back( PropertyInfo(Variant::INT,"shape_count",PROPERTY_HINT_RANGE,"0,256,1",PROPERTY_USAGE_NOEDITOR) );
+	p_list->push_back( PropertyInfo(Variant::INT,"shape_count",PROPERTY_HINT_RANGE,"0,256,1",PROPERTY_USAGE_NOEDITOR|PROPERTY_USAGE_NO_INSTANCE_STATE) );
 
 	for(int i=0;i<shapes.size();i++) {
 		String path="shapes/"+itos(i)+"/";
-		p_list->push_back( PropertyInfo(Variant::OBJECT,path+"shape",PROPERTY_HINT_RESOURCE_TYPE,"Shape2D",PROPERTY_USAGE_NOEDITOR) );
-		p_list->push_back( PropertyInfo(Variant::TRANSFORM,path+"transform",PROPERTY_HINT_NONE,"",PROPERTY_USAGE_NOEDITOR) );
-		p_list->push_back( PropertyInfo(Variant::BOOL,path+"trigger",PROPERTY_HINT_NONE,"",PROPERTY_USAGE_NOEDITOR) );
+		p_list->push_back( PropertyInfo(Variant::OBJECT,path+"shape",PROPERTY_HINT_RESOURCE_TYPE,"Shape2D",PROPERTY_USAGE_NOEDITOR|PROPERTY_USAGE_NO_INSTANCE_STATE) );
+		p_list->push_back( PropertyInfo(Variant::TRANSFORM,path+"transform",PROPERTY_HINT_NONE,"",PROPERTY_USAGE_NOEDITOR|PROPERTY_USAGE_NO_INSTANCE_STATE) );
+		p_list->push_back( PropertyInfo(Variant::BOOL,path+"trigger",PROPERTY_HINT_NONE,"",PROPERTY_USAGE_NOEDITOR|PROPERTY_USAGE_NO_INSTANCE_STATE) );
 	}
+}
+
+
+void CollisionObject2D::set_pickable(bool p_enabled) {
+
+	if (pickable==p_enabled)
+		return;
+
+	pickable=p_enabled;
+	_update_pickable();
+}
+
+bool CollisionObject2D::is_pickable() const {
+
+	return pickable;
+}
+
+void CollisionObject2D::_input_event(Node *p_viewport, const InputEvent& p_input_event, int p_shape) {
+
+	if (get_script_instance()) {
+		get_script_instance()->call(SceneStringNames::get_singleton()->_input_event,p_viewport,p_input_event,p_shape);
+	}
+	emit_signal(SceneStringNames::get_singleton()->input_event,p_viewport,p_input_event,p_shape);
+}
+
+void CollisionObject2D::_mouse_enter() {
+
+	if (get_script_instance()) {
+		get_script_instance()->call(SceneStringNames::get_singleton()->_mouse_enter);
+	}
+	emit_signal(SceneStringNames::get_singleton()->mouse_enter);
+}
+
+
+void CollisionObject2D::_mouse_exit() {
+
+	if (get_script_instance()) {
+		get_script_instance()->call(SceneStringNames::get_singleton()->_mouse_exit);
+	}
+	emit_signal(SceneStringNames::get_singleton()->mouse_exit);
+
+}
+
+void CollisionObject2D::_update_pickable() {
+	if (!is_inside_tree())
+		return;
+	bool pickable = this->pickable && is_inside_tree() && is_visible();
+	if (area)
+		Physics2DServer::get_singleton()->area_set_pickable(rid,pickable);
+	else
+		Physics2DServer::get_singleton()->body_set_pickable(rid,pickable);
 }
 
 void CollisionObject2D::_bind_methods() {
@@ -175,6 +237,17 @@ void CollisionObject2D::_bind_methods() {
 	ObjectTypeDB::bind_method(_MD("remove_shape","shape_idx"),&CollisionObject2D::remove_shape);
 	ObjectTypeDB::bind_method(_MD("clear_shapes"),&CollisionObject2D::clear_shapes);
 	ObjectTypeDB::bind_method(_MD("get_rid"),&CollisionObject2D::get_rid);
+
+	ObjectTypeDB::bind_method(_MD("set_pickable","enabled"),&CollisionObject2D::set_pickable);
+	ObjectTypeDB::bind_method(_MD("is_pickable"),&CollisionObject2D::is_pickable);
+
+	BIND_VMETHOD( MethodInfo("_input_event",PropertyInfo(Variant::OBJECT,"viewport"),PropertyInfo(Variant::INPUT_EVENT,"event"),PropertyInfo(Variant::INT,"shape_idx")));
+
+	ADD_SIGNAL( MethodInfo("input_event",PropertyInfo(Variant::OBJECT,"viewport"),PropertyInfo(Variant::INPUT_EVENT,"event"),PropertyInfo(Variant::INT,"shape_idx")));
+	ADD_SIGNAL( MethodInfo("mouse_enter"));
+	ADD_SIGNAL( MethodInfo("mouse_exit"));
+
+	ADD_PROPERTY( PropertyInfo(Variant::BOOL,"input/pickable"),_SCS("set_pickable"),_SCS("is_pickable"));
 
 }
 
@@ -258,7 +331,9 @@ CollisionObject2D::CollisionObject2D(RID p_rid, bool p_area) {
 
 	rid=p_rid;
 	area=p_area;
+	pickable=true;
 	if (p_area) {
+
 		Physics2DServer::get_singleton()->area_attach_object_instance_ID(rid,get_instance_ID());
 	} else {
 		Physics2DServer::get_singleton()->body_attach_object_instance_ID(rid,get_instance_ID());

@@ -141,6 +141,23 @@ Error decode_variant(Variant& r_variant,const uint8_t *p_buffer, int p_len,int *
 				(*r_len)+=4*3;
 
 		} break;
+		case Variant::MATRIX32: {
+
+			ERR_FAIL_COND_V(len<(int)4*6,ERR_INVALID_DATA);
+			Matrix32 val;
+			for(int i=0;i<3;i++) {
+				for(int j=0;j<2;j++) {
+
+					val.elements[i][j]=decode_float(&buf[(i*2+j)*4]);
+				}
+			}
+
+			r_variant=val;
+
+			if (r_len)
+				(*r_len)+=4*6;
+
+		} break;
 		case Variant::PLANE: {
 
 			ERR_FAIL_COND_V(len<(int)4*4,ERR_INVALID_DATA);
@@ -264,26 +281,94 @@ Error decode_variant(Variant& r_variant,const uint8_t *p_buffer, int p_len,int *
 			}
 
 			r_variant=img;
-			if (r_len)
+			if (r_len) {
+				if (datalen%4)
+					(*r_len)+=4-datalen%4;
+
 				(*r_len)+=4*5+datalen;
+			}
 
 		} break;
 		case Variant::NODE_PATH: {
 
-			ERR_FAIL_COND_V(len<4,ERR_INVALID_DATA);
+			ERR_FAIL_COND_V(len<4,ERR_INVALID_DATA);			
 			uint32_t strlen = decode_uint32(buf);
-			buf+=4;
-			len-=4;
-			ERR_FAIL_COND_V((int)strlen>len,ERR_INVALID_DATA);
+
+			if (strlen&0x80000000) {
+				//new format
+				ERR_FAIL_COND_V(len<12,ERR_INVALID_DATA);
+				Vector<StringName> names;
+				Vector<StringName> subnames;
+				bool absolute;
+				StringName prop;
+
+				int i=0;
+				uint32_t namecount=strlen&=0x7FFFFFFF;
+				uint32_t subnamecount = decode_uint32(buf+4);
+				uint32_t flags = decode_uint32(buf+8);
+
+				len-=12;
+				buf+=12;
+
+				int total=namecount+subnamecount;
+				if (flags&2)
+					total++;
+
+				if (r_len)
+					(*r_len)+=12;
 
 
-			String str;
-			str.parse_utf8((const char*)buf,strlen);
+				for(int i=0;i<total;i++) {
 
-			r_variant=NodePath(str);
+					ERR_FAIL_COND_V((int)len<4,ERR_INVALID_DATA);
+					strlen = decode_uint32(buf);
 
-			if (r_len)
-				(*r_len)+=4+strlen;
+					int pad=0;
+
+					if (strlen%4)
+						pad+=4-strlen%4;
+
+					buf+=4;
+					len-=4;
+					ERR_FAIL_COND_V((int)strlen+pad>len,ERR_INVALID_DATA);
+
+					String str;
+					str.parse_utf8((const char*)buf,strlen);
+
+
+					if (i<namecount)
+						names.push_back(str);
+					else if (i<namecount+subnamecount)
+						subnames.push_back(str);
+					else
+						prop=str;
+
+					buf+=strlen+pad;
+					len-=strlen+pad;
+
+					if (r_len)
+						(*r_len)+=4+strlen+pad;
+
+				}
+
+				r_variant=NodePath(names,subnames,flags&1,prop);
+
+			} else {
+				//old format, just a string
+
+				buf+=4;
+				len-=4;
+				ERR_FAIL_COND_V((int)strlen>len,ERR_INVALID_DATA);
+
+
+				String str;
+				str.parse_utf8((const char*)buf,strlen);
+
+				r_variant=NodePath(str);
+
+				if (r_len)
+					(*r_len)+=4+strlen;
+			}
 
 		} break;
 		/*case Variant::RESOURCE: {
@@ -581,6 +666,45 @@ Error decode_variant(Variant& r_variant,const uint8_t *p_buffer, int p_len,int *
 
 
 		} break;
+		case Variant::VECTOR2_ARRAY: {
+
+			ERR_FAIL_COND_V(len<4,ERR_INVALID_DATA);
+			uint32_t count = decode_uint32(buf);
+			ERR_FAIL_COND_V(count<0,ERR_INVALID_DATA);
+			buf+=4;
+			len-=4;
+
+			ERR_FAIL_COND_V((int)count*4*2>len,ERR_INVALID_DATA);
+			DVector<Vector2> varray;
+
+			if (r_len) {
+				(*r_len)+=4;
+			}
+
+			if (count) {
+				varray.resize(count);
+				DVector<Vector2>::Write w = varray.write();
+				const float *r = (const float*)buf;
+
+				for(int i=0;i<(int)count;i++) {
+
+					w[i].x=decode_float(buf+i*4*2+4*0);
+					w[i].y=decode_float(buf+i*4*2+4*1);
+
+				}
+
+				int adv = 4*2*count;
+
+				if (r_len)
+					(*r_len)+=adv;
+				len-=adv;
+				buf+=adv;
+
+			}
+
+			r_variant=varray;
+
+		} break;
 		case Variant::VECTOR3_ARRAY: {
 
 			ERR_FAIL_COND_V(len<4,ERR_INVALID_DATA);
@@ -713,7 +837,59 @@ Error encode_variant(const Variant& p_variant, uint8_t *r_buffer, int &r_len) {
 			r_len+=4;
 
 		} break;
-		case Variant::NODE_PATH:
+		case Variant::NODE_PATH: {
+
+			NodePath np=p_variant;
+			if (buf) {
+				encode_uint32(uint32_t(np.get_name_count())|0x80000000,buf);	//for compatibility with the old format
+				encode_uint32(np.get_subname_count(),buf+4);
+				uint32_t flags=0;
+				if (np.is_absolute())
+					flags|=1;
+				if (np.get_property()!=StringName())
+					flags|=2;
+
+				encode_uint32(flags,buf+8);
+
+				buf+=12;
+			}
+
+			r_len+=12;
+
+			int total = np.get_name_count()+np.get_subname_count();
+			if (np.get_property()!=StringName())
+				total++;
+
+			for(int i=0;i<total;i++) {
+
+				String str;
+
+				if (i<np.get_name_count())
+					str=np.get_name(i);
+				else if (i<np.get_name_count()+np.get_subname_count())
+					str=np.get_subname(i-np.get_subname_count());
+				else
+					str=np.get_property();
+
+				CharString utf8 = str.utf8();
+
+				int pad = 0;
+
+				if (utf8.length()%4)
+					pad=4-utf8.length()%4;
+
+				if (buf) {
+					encode_uint32(utf8.length(),buf);
+					buf+=4;
+					copymem(buf,utf8.get_data(),utf8.length());
+					buf+=pad+utf8.length();
+				}
+
+
+				r_len+=4+utf8.length()+pad;
+			}
+
+		} break;
 		case Variant::STRING: {
 
 
@@ -766,6 +942,22 @@ Error encode_variant(const Variant& p_variant, uint8_t *r_buffer, int &r_len) {
 			}
 
 			r_len+=3*4;
+
+		} break;
+		case Variant::MATRIX32: {
+
+			if (buf) {
+				Matrix32 val=p_variant;
+				for(int i=0;i<3;i++) {
+					for(int j=0;j<2;j++) {
+
+						copymem(&buf[(i*2+j)*4],&val.elements[i][j],sizeof(float));
+					}
+				}
+			}
+
+
+			r_len+=6*4;
 
 		} break;
 		case Variant::PLANE: {
@@ -879,7 +1071,11 @@ Error encode_variant(const Variant& p_variant, uint8_t *r_buffer, int &r_len) {
 				copymem(&buf[20],&r[0],ds);
 			}
 
-			r_len+=data.size()+5*4;
+			int pad=0;
+			if (data.size()%4)
+				pad=4-data.size()%4;
+
+			r_len+=data.size()+5*4+pad;
 
 		} break;		
 		/*case Variant::RESOURCE: {
@@ -1124,6 +1320,34 @@ Error encode_variant(const Variant& p_variant, uint8_t *r_buffer, int &r_len) {
 						buf++;
 				}
 			}
+
+		} break;
+		case Variant::VECTOR2_ARRAY: {
+
+			DVector<Vector2> data = p_variant;
+			int len=data.size();
+
+			if (buf) {
+				encode_uint32(len,buf);
+				buf+=4;
+			}
+
+			r_len+=4;
+
+			if (buf) {
+
+				for(int i=0;i<len;i++) {
+
+					Vector2 v = data.get(i);
+
+					encode_float(v.x,&buf[0]);
+					encode_float(v.y,&buf[4]);
+					buf+=4*2;
+
+				}
+			}
+
+			r_len+=4*2*len;
 
 		} break;
 		case Variant::VECTOR3_ARRAY: {

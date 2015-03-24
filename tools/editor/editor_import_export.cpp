@@ -124,6 +124,40 @@ EditorImportPlugin::EditorImportPlugin() {
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
+void EditorExportPlugin::_bind_methods() {
+
+	BIND_VMETHOD( MethodInfo("custom_export:Dictionary",PropertyInfo(Variant::STRING,"name",PROPERTY_HINT_RESOURCE_TYPE,"EditorExportPlatformPC")) );
+}
+
+
+Vector<uint8_t> EditorExportPlugin::custom_export(String& p_path,const Ref<EditorExportPlatform> &p_platform) {
+
+	if (get_script_instance()) {
+
+		Variant d = get_script_instance()->call("custom_export",p_path,p_platform);
+		if (d.get_type()==Variant::NIL)
+			return Vector<uint8_t>();
+		ERR_FAIL_COND_V(d.get_type()!=Variant::DICTIONARY,Vector<uint8_t>());
+		Dictionary dict=d;
+		ERR_FAIL_COND_V(!dict.has("name"),Vector<uint8_t>());
+		ERR_FAIL_COND_V(!dict.has("data"),Vector<uint8_t>());
+		p_path=dict["name"];
+		return dict["data"];
+	}
+
+	return Vector<uint8_t>();
+
+}
+
+
+EditorExportPlugin::EditorExportPlugin() {
+
+
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
 static void _add_to_list(EditorFileSystemDirectory *p_efsd,Set<StringName>& r_list) {
 
 	for(int i=0;i<p_efsd->get_subdir_count();i++) {
@@ -223,47 +257,16 @@ static void _add_filter_to_list(Set<StringName>& r_list,const String& p_filter) 
 
 Vector<uint8_t> EditorExportPlatform::get_exported_file(String& p_fname) const {
 
+	Ref<EditorExportPlatform> ep=EditorImportExport::get_singleton()->get_export_platform(get_name());
 
-	Ref<ResourceImportMetadata> rimd = ResourceLoader::load_import_metadata(p_fname);
+	for(int i=0;i<EditorImportExport::get_singleton()->get_export_plugin_count();i++) {
 
-	if (rimd.is_valid()) {
+		Vector<uint8_t> data = EditorImportExport::get_singleton()->get_export_plugin(i)->custom_export(p_fname,ep);
+		if (data.size())
+			return data;
 
-		if (rimd->get_editor()!="") {
-			Ref<EditorImportPlugin> pl = EditorImportExport::get_singleton()->get_import_plugin_by_name(rimd->get_editor());
-			if (pl.is_valid()) {
-				Vector<uint8_t> ce = pl->custom_export(p_fname,EditorImportExport::get_singleton()->get_export_platform(get_name()));
-				if (ce.size())
-					return ce;
-			}
-		}
-	} else if (EditorImportExport::get_singleton()->image_get_export_group(p_fname)) {
-
-
-		Ref<EditorImportPlugin> pl = EditorImportExport::get_singleton()->get_import_plugin_by_name("texture_2d");
-		if (pl.is_valid()) {
-			Vector<uint8_t> ce = pl->custom_export(p_fname,EditorImportExport::get_singleton()->get_export_platform(get_name()));
-			if (ce.size()) {
-				p_fname=p_fname.basename()+".tex";
-				return ce;
-			}
-		}
-
-	} else if (EditorImportExport::get_singleton()->get_export_image_action()!=EditorImportExport::IMAGE_ACTION_NONE){
-
-		String xt = p_fname.extension().to_lower();
-		print_line("TRY FOR: "+p_fname);
-		if (EditorImportExport::get_singleton()->get_image_formats().has(xt)) { //should check for more I guess?
-
-			Ref<EditorImportPlugin> pl = EditorImportExport::get_singleton()->get_import_plugin_by_name("texture_2d");
-			if (pl.is_valid()) {
-				Vector<uint8_t> ce = pl->custom_export(p_fname,EditorImportExport::get_singleton()->get_export_platform(get_name()));
-				if (ce.size()) {
-					p_fname=p_fname.basename()+".tex";
-					return ce;
-				}
-			}
-		}
 	}
+
 
 	FileAccess *f = FileAccess::open(p_fname,FileAccess::READ);
 	ERR_FAIL_COND_V(!f,Vector<uint8_t>());
@@ -289,7 +292,11 @@ Vector<StringName> EditorExportPlatform::get_dependencies(bool p_bundles) const 
 			_add_filter_to_list(exported,"*");
 		} else {
 			_add_to_list(EditorFileSystem::get_singleton()->get_filesystem(),exported);
-			_add_filter_to_list(exported,EditorImportExport::get_singleton()->get_export_custom_filter());
+			String cf = EditorImportExport::get_singleton()->get_export_custom_filter();
+			if (cf!="")
+				cf+=",";
+			cf+="*.flags";
+			_add_filter_to_list(exported,cf);
 
 		}
 
@@ -358,8 +365,12 @@ Vector<StringName> EditorExportPlatform::get_dependencies(bool p_bundles) const 
 				}
 			}
 		}
+		String cf = EditorImportExport::get_singleton()->get_export_custom_filter();
+		if (cf!="")
+			cf+=",";
+		cf+="*.flags";
+		_add_filter_to_list(exported,cf);
 
-		_add_filter_to_list(exported,EditorImportExport::get_singleton()->get_export_custom_filter());
 
 	}
 
@@ -436,10 +447,50 @@ bool EditorExportPlatformPC::_get(const StringName& p_name,Variant &r_ret) const
 
 void EditorExportPlatformPC::_get_property_list( List<PropertyInfo> *p_list) const {
 
-	p_list->push_back( PropertyInfo( Variant::STRING, "custom_binary/debug", PROPERTY_HINT_FILE,binary_extension));
-	p_list->push_back( PropertyInfo( Variant::STRING, "custom_binary/release", PROPERTY_HINT_FILE,binary_extension));
+	p_list->push_back( PropertyInfo( Variant::STRING, "custom_binary/debug", PROPERTY_HINT_GLOBAL_FILE,binary_extension));
+	p_list->push_back( PropertyInfo( Variant::STRING, "custom_binary/release", PROPERTY_HINT_GLOBAL_FILE,binary_extension));
 	p_list->push_back( PropertyInfo( Variant::INT, "resources/pack_mode", PROPERTY_HINT_ENUM,"Single Exec.,Exec+Pack (.pck),Copy,Bundles (Optical)"));
 	p_list->push_back( PropertyInfo( Variant::BOOL, "binary/64_bits"));
+}
+
+
+
+static void _exp_add_dep(Map<StringName,List<StringName> > &deps,const StringName& p_path) {
+
+
+	if (deps.has(p_path))
+		return; //already done
+
+	deps.insert(p_path,List<StringName>());
+
+	List<StringName> &deplist=deps[p_path];
+	Set<StringName> depset;
+
+	List<String> dl;
+	ResourceLoader::get_dependencies(p_path,&dl);
+
+	//added in order so child dependencies are always added bfore parent dependencies
+	for (List<String>::Element *E=dl.front();E;E=E->next()) {
+
+
+		if (!deps.has(E->get()))
+			_exp_add_dep(deps,E->get());
+
+		for(List<StringName>::Element *F=deps[E->get()].front();F;F=F->next()) {
+
+
+			if (!depset.has(F->get())) {
+				depset.insert(F->get());
+				deplist.push_back(F->get());
+			}
+		}
+
+		if (!depset.has(E->get())) {
+			depset.insert(E->get());
+			deplist.push_back(E->get());
+		}
+
+	}
 }
 
 
@@ -449,6 +500,18 @@ Error EditorExportPlatform::export_project_files(EditorExportSaveFunction p_func
 /* ALL FILES AND DEPENDENCIES */
 
 	Vector<StringName> files=get_dependencies(p_make_bundles);
+
+	Map<StringName,List<StringName> > deps;
+
+	if (false) {
+		for(int i=0;i<files.size();i++) {
+
+			_exp_add_dep(deps,files[i]);
+
+		}
+	}
+
+
 
 /* GROUP ATLAS */
 
@@ -471,12 +534,25 @@ Error EditorExportPlatform::export_project_files(EditorExportSaveFunction p_func
 		EditorImportExport::get_singleton()->image_export_get_images_in_group(E->get(),&atlas_images);
 		atlas_images.sort_custom<StringName::AlphCompare>();
 
+		for (List<StringName>::Element *F=atlas_images.front();F;) {
+
+			List<StringName>::Element *N=F->next();
+
+			if (!FileAccess::exists(F->get())) {
+				atlas_images.erase(F);
+			}
+
+			F=N;
+
+		}
+
 		if (atlas_images.size()<=1)
 			continue;
 
 		int group_format=0;
 		float group_lossy_quality=EditorImportExport::get_singleton()->image_export_group_get_lossy_quality(E->get());
 		int group_shrink=EditorImportExport::get_singleton()->image_export_group_get_shrink(E->get());
+		group_shrink*=EditorImportExport::get_singleton()->get_export_image_shrink();
 
 		switch(EditorImportExport::get_singleton()->image_export_group_get_image_action(E->get())) {
 			case EditorImportExport::IMAGE_ACTION_NONE: {
@@ -627,7 +703,7 @@ Error EditorExportPlatform::export_project_files(EditorExportSaveFunction p_func
 
 			for (List<StringName>::Element *F=atlas_images.front();F;F=F->next()) {
 
-				imd->add_source(EditorImportPlugin::validate_source_path(F->get()));
+				imd->add_source(EditorImportPlugin::validate_source_path(F->get()),FileAccess::get_md5(F->get()));
 			}
 
 
@@ -636,11 +712,11 @@ Error EditorExportPlatform::export_project_files(EditorExportSaveFunction p_func
 
 			int flags=0;
 
-			if (Globals::get_singleton()->get("texture_import/filter"))
+			if (Globals::get_singleton()->get("image_loader/filter"))
 				flags|=EditorTextureImportPlugin::IMAGE_FLAG_FILTER;
-			if (!Globals::get_singleton()->get("texture_import/gen_mipmaps"))
+			if (!Globals::get_singleton()->get("image_loader/gen_mipmaps"))
 				flags|=EditorTextureImportPlugin::IMAGE_FLAG_NO_MIPMAPS;
-			if (!Globals::get_singleton()->get("texture_import/repeat"))
+			if (!Globals::get_singleton()->get("image_loader/repeat"))
 				flags|=EditorTextureImportPlugin::IMAGE_FLAG_REPEAT;
 
 			flags|=EditorTextureImportPlugin::IMAGE_FLAG_FIX_BORDER_ALPHA;
@@ -667,7 +743,6 @@ Error EditorExportPlatform::export_project_files(EditorExportSaveFunction p_func
 			rects.resize(r_rects.size());
 			for(int i=0;i<r_rects.size();i++) {
 				//get back region and margins
-
 				rects[i]=r_rects[i];
 			}
 
@@ -772,18 +847,49 @@ Error EditorExportPlatform::export_project_files(EditorExportSaveFunction p_func
 	{
 
 		//make binary engine.cfg config
-
 		Map<String,Variant> custom;
+
 
 		if (remap_files.size()) {
 			Vector<String> remapsprop;
 			for(Map<StringName,StringName>::Element *E=remap_files.front();E;E=E->next()) {
+				print_line("REMAP: "+String(E->key())+" -> "+E->get());
 				remapsprop.push_back(E->key());
 				remapsprop.push_back(E->get());
 			}
 
 			custom["remap/all"]=remapsprop;
 		}
+
+		//add presaved dependencies
+		for(Map<StringName,List<StringName> >::Element *E=deps.front();E;E=E->next()) {
+
+			if (E->get().size()==0)
+				continue; //no deps
+			String key;
+			Vector<StringName> deps;
+			//if bundle continue (when bundles supported obviously)
+
+			if (remap_files.has(E->key())) {
+				key=remap_files[E->key()];
+			} else {
+				key=E->key();
+			}
+
+			deps.resize(E->get().size());
+			int i=0;
+
+			for(List<StringName>::Element *F=E->get().front();F;F=F->next()) {
+				deps[i++]=F->get();
+				print_line(" -"+String(F->get()));
+			}
+
+			NodePath prop(deps,true,String()); //seems best to use this for performance
+
+			custom["deps/"+key.md5_text()]=prop;
+
+		}
+
 		String remap_file="engine.cfb";
 		String engine_cfb =EditorSettings::get_singleton()->get_settings_path()+"/tmp/tmp"+remap_file;
 		Globals::get_singleton()->save_custom(engine_cfb,custom);
@@ -798,6 +904,16 @@ Error EditorExportPlatform::export_project_files(EditorExportSaveFunction p_func
 	return OK;
 }
 
+static int _get_pad(int p_alignment, int p_n) {
+
+	int rest = p_n % p_alignment;
+	int pad = 0;
+	if (rest > 0) {
+		pad = p_alignment - rest;
+	};
+
+	return pad;
+};
 
 Error EditorExportPlatform::save_pack_file(void *p_userdata,const String& p_path, const Vector<uint8_t>& p_data,int p_file,int p_total) {
 
@@ -814,14 +930,29 @@ Error EditorExportPlatform::save_pack_file(void *p_userdata,const String& p_path
 	pd->file_ofs.push_back(td);
 	pd->f->store_64(0); //ofs
 	pd->f->store_64(0); //size
+	{
+		MD5_CTX ctx;
+		MD5Init(&ctx);
+		MD5Update(&ctx,(unsigned char*)p_data.ptr(),p_data.size());
+		MD5Final(&ctx);
+		pd->f->store_buffer(ctx.digest,16);
+	}
 	pd->ep->step("Storing File: "+p_path,2+p_file*100/p_total);
 	pd->count++;
 	pd->ftmp->store_buffer(p_data.ptr(),p_data.size());
+	if (pd->alignment > 1) {
+
+		int pad = _get_pad(pd->alignment, pd->ftmp->get_pos());
+		for (int i=0; i<pad; i++) {
+
+			pd->ftmp->store_8(0);
+		};
+	};
 	return OK;
 
 }
 
-Error EditorExportPlatform::save_pack(FileAccess *dst,bool p_make_bundles) {
+Error EditorExportPlatform::save_pack(FileAccess *dst,bool p_make_bundles, int p_alignment) {
 
 	EditorProgress ep("savepack","Packing",102);
 
@@ -829,15 +960,15 @@ Error EditorExportPlatform::save_pack(FileAccess *dst,bool p_make_bundles) {
 	FileAccess *tmp = FileAccess::open(tmppath,FileAccess::WRITE);
 	uint64_t ofs_begin = dst->get_pos();
 
-	dst->store_32(0x4b435047); //GPCK
+	dst->store_32(0x43504447); //GDPK
+	dst->store_32(0); //pack version
 	dst->store_32(VERSION_MAJOR);
 	dst->store_32(VERSION_MINOR);
-	dst->store_32(VERSION_REVISION);
+	dst->store_32(0); //hmph
 	for(int i=0;i<16;i++) {
 		//reserved
 		dst->store_32(0);
 	}
-
 
 	size_t fcountpos = dst->get_pos();
 	dst->store_32(0);
@@ -847,10 +978,19 @@ Error EditorExportPlatform::save_pack(FileAccess *dst,bool p_make_bundles) {
 	pd.f=dst;
 	pd.ftmp=tmp;
 	pd.count=0;
+	pd.alignment = p_alignment;
 	Error err = export_project_files(save_pack_file,&pd,p_make_bundles);
 	memdelete(tmp);
 	if (err)
 		return err;
+
+	if (p_alignment > 1) {
+		int pad = _get_pad(p_alignment, dst->get_pos());
+		for (int i=0; i<pad; i++) {
+
+			dst->store_8(0);
+		};
+	};
 
 	size_t ofsplus = dst->get_pos();
 	//append file
@@ -872,7 +1012,7 @@ Error EditorExportPlatform::save_pack(FileAccess *dst,bool p_make_bundles) {
 	memdelete(tmp);
 
 	dst->store_64(dst->get_pos()-ofs_begin);
-	dst->store_32(0x4b435047); //GPCK
+	dst->store_32(0x43504447); //GDPK
 
 	//fix offsets
 
@@ -888,7 +1028,7 @@ Error EditorExportPlatform::save_pack(FileAccess *dst,bool p_make_bundles) {
 	return OK;
 }
 
-Error EditorExportPlatformPC::export_project(const String& p_path,bool p_debug,const String& p_password) {
+Error EditorExportPlatformPC::export_project(const String& p_path, bool p_debug, bool p_dumb) {
 
 
 
@@ -903,15 +1043,15 @@ Error EditorExportPlatformPC::export_project(const String& p_path,bool p_debug,c
 	String exe_path = EditorSettings::get_singleton()->get_settings_path()+"/templates/";
 	if (use64) {
 		if (p_debug)
-			exe_path+=custom_debug_binary!=""?custom_debug_binary:debug_binary64;
+			exe_path=custom_debug_binary!=""?custom_debug_binary:exe_path+debug_binary64;
 		else
-			exe_path+=custom_release_binary!=""?custom_release_binary:release_binary64;
+			exe_path=custom_release_binary!=""?custom_release_binary:exe_path+release_binary64;
 	} else {
 
 		if (p_debug)
-			exe_path+=custom_debug_binary!=""?custom_debug_binary:debug_binary32;
+			exe_path=custom_debug_binary!=""?custom_debug_binary:exe_path+debug_binary32;
 		else
-			exe_path+=custom_release_binary!=""?custom_release_binary:release_binary32;
+			exe_path=custom_release_binary!=""?custom_release_binary:exe_path+release_binary32;
 
 	}
 
@@ -926,7 +1066,7 @@ Error EditorExportPlatformPC::export_project(const String& p_path,bool p_debug,c
 	if (!dst) {
 
 		EditorNode::add_io_error("Can't copy executable file to:\n "+p_path);
-		return ERR_FILE_CANT_READ;
+		return ERR_FILE_CANT_WRITE;
 	}
 
 	uint8_t buff[32768];
@@ -955,7 +1095,7 @@ Error EditorExportPlatformPC::export_project(const String& p_path,bool p_debug,c
 		if (!dst) {
 
 			EditorNode::add_io_error("Can't write data pack to:\n "+p_path);
-			return ERR_FILE_CANT_READ;
+			return ERR_FILE_CANT_WRITE;
 		}
 	}
 
@@ -1027,8 +1167,34 @@ EditorImportExport* EditorImportExport::singleton=NULL;
 
 void EditorImportExport::add_import_plugin(const Ref<EditorImportPlugin>& p_plugin) {
 
+	// Need to make sure the name is unique if we are going to lookup by it
+	ERR_FAIL_COND(by_idx.has(p_plugin->get_name()));
+
 	by_idx[ p_plugin->get_name() ]=plugins.size();
 	plugins.push_back(p_plugin);
+}
+
+void EditorImportExport::remove_import_plugin(const Ref<EditorImportPlugin>& p_plugin) {
+
+	String plugin_name = p_plugin->get_name();
+
+	// Keep the indices the same
+	// Find the index of the target plugin
+	ERR_FAIL_COND(!by_idx.has(plugin_name));
+	int idx = by_idx[plugin_name];
+	int last_idx = plugins.size() - 1;
+
+	// Swap the last plugin and the target one
+	SWAP(plugins[idx], plugins[last_idx]);
+
+	// Update the index of the old last one
+	by_idx[plugins[idx]->get_name()] = idx;
+
+	// Remove the target plugin's by_idx entry
+	by_idx.erase(plugin_name);
+
+	// Erase the plugin
+	plugins.remove(last_idx);
 }
 
 int EditorImportExport::get_import_plugin_count() const{
@@ -1041,12 +1207,29 @@ Ref<EditorImportPlugin> EditorImportExport::get_import_plugin(int p_idx) const{
 	return plugins[p_idx];
 
 }
+
+
+
 Ref<EditorImportPlugin> EditorImportExport::get_import_plugin_by_name(const String& p_string) const{
 
 	ERR_FAIL_COND_V( !by_idx.has(p_string), Ref<EditorImportPlugin>());
 	return plugins[ by_idx[p_string] ];
 }
 
+void EditorImportExport::add_export_plugin(const Ref<EditorExportPlugin>& p_plugin) {
+
+	export_plugins.push_back(p_plugin);
+}
+
+int EditorImportExport::get_export_plugin_count() const{
+
+	return export_plugins.size();
+}
+Ref<EditorExportPlugin> EditorImportExport::get_export_plugin(int p_idx) const{
+
+	ERR_FAIL_INDEX_V(p_idx,export_plugins.size(),Ref<EditorExportPlugin>());
+	return export_plugins[p_idx];
+}
 
 void EditorImportExport::set_export_file_action(const StringName& p_file, FileAction p_action) {
 
@@ -1144,6 +1327,16 @@ void EditorImportExport::set_export_image_action(ImageAction p_action) {
 EditorImportExport::ImageAction EditorImportExport::get_export_image_action() const{
 
 	return image_action;
+}
+
+void EditorImportExport::set_export_image_shrink(int p_shrink) {
+
+	image_shrink=p_shrink;
+}
+
+int EditorImportExport::get_export_image_shrink() const{
+
+	return image_shrink;
 }
 
 
@@ -1296,6 +1489,10 @@ void EditorImportExport::load_config() {
 			image_action=IMAGE_ACTION_COMPRESS_DISK;
 
 		image_action_compress_quality = cf->get_value(ci,"compress_quality");
+		if (cf->has_section_key(ci,"shrink"))
+			image_shrink = cf->get_value(ci,"shrink");
+		else
+			image_shrink=1;
 		String formats=cf->get_value(ci,"formats");
 		Vector<String> f = formats.split(",");
 		image_formats.clear();
@@ -1342,8 +1539,6 @@ void EditorImportExport::load_config() {
 		List<String> keys;
 		cf->get_section_keys(s,&keys);
 		for(List<String>::Element *F=keys.front();F;F=F->next()) {
-			print_line("sk: "+F->get());
-
 			ep->set(F->get(),cf->get_value(s,F->get()));
 		}
 	}
@@ -1397,6 +1592,26 @@ void EditorImportExport::load_config() {
 
 	}
 
+
+	if (cf->has_section("script")) {
+
+		if (cf->has_section_key("script","action")) {
+
+			String action = cf->get_value("script","action");
+			if (action=="compile")
+				script_action=SCRIPT_ACTION_COMPILE;
+			else if (action=="encrypt")
+				script_action=SCRIPT_ACTION_ENCRYPT;
+			else
+				script_action=SCRIPT_ACTION_NONE;
+
+		}
+
+		if (cf->has_section_key("script","encrypt_key")) {
+
+			script_key = cf->get_value("script","encrypt_key");
+		}
+	}
 
 }
 
@@ -1454,6 +1669,7 @@ void EditorImportExport::save_config() {
 		case IMAGE_ACTION_COMPRESS_DISK: cf->set_value("convert_images","action","compress_disk"); break;
 	}
 
+	cf->set_value("convert_images","shrink",image_shrink);
 	cf->set_value("convert_images","compress_quality",image_action_compress_quality);
 
 	String formats;
@@ -1498,9 +1714,38 @@ void EditorImportExport::save_config() {
 		cf->set_value("image_group_files","files",igfsave);
 	}
 
+	switch(script_action) {
+		case SCRIPT_ACTION_NONE: cf->set_value("script","action","none"); break;
+		case SCRIPT_ACTION_COMPILE: cf->set_value("script","action","compile"); break;
+		case SCRIPT_ACTION_ENCRYPT: cf->set_value("script","action","encrypt"); break;
+	}
+
+	cf->set_value("script","encrypt_key",script_key);
+
 	cf->save("res://export.cfg");
 
 }
+
+
+void EditorImportExport::script_set_action(ScriptAction p_action) {
+
+	script_action=p_action;
+}
+
+EditorImportExport::ScriptAction EditorImportExport::script_get_action() const{
+
+	return script_action;
+}
+
+void EditorImportExport::script_set_encryption_key(const String& p_key){
+
+	script_key=p_key;
+}
+String EditorImportExport::script_get_encryption_key() const{
+
+	return script_key;
+}
+
 
 void EditorImportExport::_bind_methods() {
 
@@ -1513,6 +1758,11 @@ void EditorImportExport::_bind_methods() {
 	ObjectTypeDB::bind_method(_MD("image_export_group_get_make_atlas"),&EditorImportExport::image_export_group_get_make_atlas);
 	ObjectTypeDB::bind_method(_MD("image_export_group_get_shrink"),&EditorImportExport::image_export_group_get_shrink);
 	ObjectTypeDB::bind_method(_MD("image_add_to_export_group"),&EditorImportExport::image_add_to_export_group);
+	ObjectTypeDB::bind_method(_MD("script_set_action"),&EditorImportExport::script_set_action);
+	ObjectTypeDB::bind_method(_MD("script_set_encryption_key"),&EditorImportExport::script_set_encryption_key);
+	ObjectTypeDB::bind_method(_MD("script_get_action"),&EditorImportExport::script_get_action);
+	ObjectTypeDB::bind_method(_MD("script_get_encryption_key"),&EditorImportExport::script_get_encryption_key);
+
 }
 
 EditorImportExport::EditorImportExport() {
@@ -1522,8 +1772,9 @@ EditorImportExport::EditorImportExport() {
 	image_action=IMAGE_ACTION_NONE;
 	image_action_compress_quality=0.7;
 	image_formats.insert("png");
+	image_shrink=1;
 
-
+	script_action=SCRIPT_ACTION_COMPILE;
 
 }
 

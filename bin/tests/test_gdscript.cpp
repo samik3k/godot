@@ -35,10 +35,10 @@
 
 #ifdef GDSCRIPT_ENABLED
 
-#include "script/gdscript/gd_tokenizer.h"
-#include "script/gdscript/gd_parser.h"
-#include "script/gdscript/gd_compiler.h"
-#include "script/gdscript/gd_script.h"
+#include "modules/gdscript/gd_tokenizer.h"
+#include "modules/gdscript/gd_parser.h"
+#include "modules/gdscript/gd_compiler.h"
+#include "modules/gdscript/gd_script.h"
 
 
 namespace TestGDScript {
@@ -442,6 +442,9 @@ static String _disassemble_addr(const Ref<GDScript>& p_script,const GDFunction& 
 		case GDFunction::ADDR_TYPE_SELF: {
 			return "self";
 		} break;
+		case GDFunction::ADDR_TYPE_CLASS: {
+			return "class";
+		} break;
 		case GDFunction::ADDR_TYPE_MEMBER: {
 
 			return "member("+p_script->debug_get_member_by_index(addr)+")";
@@ -735,6 +738,26 @@ static void _disassemble_class(const Ref<GDScript>& p_class,const Vector<String>
 					incr=4+argc;
 
 				} break;
+				case GDFunction::OPCODE_YIELD: {
+
+					txt+=" yield ";
+					incr=1;
+
+				} break;
+				case GDFunction::OPCODE_YIELD_SIGNAL: {
+
+					txt+=" yield_signal ";
+					txt+=DADDR(1);
+					txt+=",";
+					txt+=DADDR(2);
+					incr=3;
+				} break;
+				case GDFunction::OPCODE_YIELD_RESUME: {
+
+					txt+=" yield resume: ";
+					txt+=DADDR(1);
+					incr=2;
+				} break;
 				case GDFunction::OPCODE_JUMP: {
 
 					txt+=" jump ";
@@ -864,7 +887,7 @@ MainLoop* test(TestType p_test) {
 
 	if (p_test==TEST_TOKENIZER) {
 
-		GDTokenizer tk;
+		GDTokenizerText tk;
 		tk.set_code(code);
 		int line=-1;
 		while(tk.get_token()!=GDTokenizer::TK_EOF) {
@@ -969,7 +992,15 @@ MainLoop* test(TestType p_test) {
 
 
 
+	} else if (p_test==TEST_BYTECODE) {
+
+		Vector<uint8_t> buf = GDTokenizerBuffer::parse_code_string(code);
+		String dst = test.basename()+".gdc";
+		FileAccess *fw = FileAccess::open(dst,FileAccess::WRITE);
+		fw->store_buffer(buf.ptr(),buf.size());
+		memdelete(fw);
 	}
+
 
 #if 0
 	Parser parser;

@@ -86,7 +86,7 @@ class OS_Windows : public OS {
 	uint64_t ticks_start;
 	uint64_t ticks_per_second;
 
-	bool minimized;
+
         bool old_invalid;
         bool outside;
 	int old_x,old_y;
@@ -106,13 +106,16 @@ class OS_Windows : public OS {
 
 	struct Joystick {
 
+		int id;
 		bool attached;
 
 		DWORD last_axis[JOY_AXIS_COUNT];
 		DWORD last_buttons;
 		DWORD last_pov;
+		String name;
 
 		Joystick() {
+			id = -1;
 			attached = false;
 			for (int i=0; i<JOY_AXIS_COUNT; i++) {
 
@@ -123,9 +126,11 @@ class OS_Windows : public OS {
 		};
 	};
 
+	List<Joystick> joystick_change_queue;
 	int joystick_count;
 	Joystick joysticks[JOYSTICKS_MAX];
 	
+	Size2 window_rect;
 	VideoMode video_mode;
 
 	MainLoop *main_loop;
@@ -156,6 +161,9 @@ class OS_Windows : public OS {
 
 	void _post_dpad(DWORD p_dpad, int p_device, bool p_pressed);
 
+	void _drag_event(int p_x, int p_y, int idx);
+	void _touch_event(bool p_pressed, int p_x, int p_y, int idx);
+
 	// functions used by main to initialize/deintialize the OS
 protected:	
 	virtual int get_video_driver_count() const;
@@ -180,6 +188,7 @@ protected:
 	void probe_joysticks();
 	void process_joysticks();
 	void process_key_events();
+	String get_joystick_name( int id, JOYCAPS jcaps);
 	
 	struct ProcessInfo {
 
@@ -187,6 +196,23 @@ protected:
 		PROCESS_INFORMATION pi;
 	};
 	Map<ProcessID, ProcessInfo>* process_map;
+
+	struct MonitorInfo {
+		HMONITOR hMonitor;
+		HDC hdcMonitor;
+		Rect2 rect;
+
+
+	};
+
+	bool pre_fs_valid;
+	RECT pre_fs_rect;
+	Vector<MonitorInfo> monitor_info;
+	bool maximized;
+	bool minimized;
+
+	static BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor,  LPARAM dwData);
+
 
 public:
 	LRESULT WndProc(HWND	hWnd,UINT uMsg,	WPARAM	wParam,	LPARAM	lParam);
@@ -201,6 +227,7 @@ public:
 	void set_mouse_mode(MouseMode p_mode);
 	MouseMode get_mouse_mode() const;
 
+	virtual void warp_mouse_pos(const Point2& p_to);
 	virtual Point2 get_mouse_pos() const;
 	virtual int get_mouse_button_state() const;
 	virtual void set_window_title(const String& p_title);
@@ -208,6 +235,24 @@ public:
 	virtual void set_video_mode(const VideoMode& p_video_mode,int p_screen=0);
 	virtual VideoMode get_video_mode(int p_screen=0) const;
 	virtual void get_fullscreen_mode_list(List<VideoMode> *p_list,int p_screen=0) const;
+
+	virtual int get_screen_count() const;
+	virtual int get_current_screen() const;
+	virtual void set_current_screen(int p_screen);
+	virtual Point2 get_screen_position(int p_screen=0) const;
+	virtual Size2 get_screen_size(int p_screen=0) const;
+	virtual Point2 get_window_position() const;
+	virtual void set_window_position(const Point2& p_position);
+	virtual Size2 get_window_size() const;
+	virtual void set_window_size(const Size2 p_size);
+	virtual void set_window_fullscreen(bool p_enabled);
+	virtual bool is_window_fullscreen() const;
+	virtual void set_window_resizable(bool p_enabled);
+	virtual bool is_window_resizable() const;
+	virtual void set_window_minimized(bool p_enabled);
+	virtual bool is_window_minimized() const;
+	virtual void set_window_maximized(bool p_enabled);
+	virtual bool is_window_maximized() const;
 
 	virtual MainLoop *get_main_loop() const;
 
@@ -235,15 +280,20 @@ public:
 	void set_cursor_shape(CursorShape p_shape);
 	void set_icon(const Image& p_icon);
 
+	virtual String get_executable_path() const;
 
 	virtual String get_locale() const;
 
 	virtual void move_window_to_foreground();
 	virtual String get_data_dir() const;
+	virtual String get_system_dir(SystemDir p_dir) const;
+
 
 	virtual void release_rendering_thread();
 	virtual void make_rendering_thread();
 	virtual void swap_buffers();
+
+	virtual Error shell_open(String p_uri);
 
 	void run();
 

@@ -169,7 +169,7 @@ void ScrollContainer::_update_scrollbar_pos() {
 
 void ScrollContainer::_notification(int p_what) {
 
-	if (p_what == NOTIFICATION_ENTER_SCENE || p_what == NOTIFICATION_THEME_CHANGED) {
+	if (p_what == NOTIFICATION_ENTER_TREE || p_what == NOTIFICATION_THEME_CHANGED) {
 
 		call_deferred("_update_scrollbar_pos");
 	};
@@ -235,7 +235,7 @@ void ScrollContainer::_notification(int p_what) {
 				}
 
 				if (pos.y<0) {
-					pos.x=0;
+					pos.y=0;
 					turnoff_v=true;
 				}
 				if (pos.y > (v_scroll->get_max()-v_scroll->get_page())) {

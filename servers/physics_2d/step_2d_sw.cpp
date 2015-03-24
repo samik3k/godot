@@ -49,7 +49,7 @@ void Step2DSW::_populate_island(Body2DSW* p_body,Body2DSW** p_island,Constraint2
 			if (i==E->get())
 				continue;
 			Body2DSW *b = c->get_body_ptr()[i];
-			if (b->get_island_step()==_step || b->get_mode()==Physics2DServer::BODY_MODE_STATIC)
+			if (b->get_island_step()==_step || b->get_mode()==Physics2DServer::BODY_MODE_STATIC || b->get_mode()==Physics2DServer::BODY_MODE_KINEMATIC)
 				continue; //no go
 			_populate_island(c->get_body_ptr()[i],p_island,p_constraint_island);
 		}
@@ -87,8 +87,10 @@ void Step2DSW::_check_suspend(Body2DSW *p_island,float p_delta) {
 	Body2DSW *b = p_island;
 	while(b) {
 
-		if (b->get_mode()==Physics2DServer::BODY_MODE_STATIC)
+		if (b->get_mode()==Physics2DServer::BODY_MODE_STATIC || b->get_mode()==Physics2DServer::BODY_MODE_KINEMATIC) {
+			b=b->get_island_next();
 			continue; //ignore for static
+		}
 
 		if (!b->sleep_test(p_delta))
 			can_sleep=false;
@@ -101,8 +103,10 @@ void Step2DSW::_check_suspend(Body2DSW *p_island,float p_delta) {
 	b = p_island;
 	while(b) {
 
-		if (b->get_mode()==Physics2DServer::BODY_MODE_STATIC)
+		if (b->get_mode()==Physics2DServer::BODY_MODE_STATIC || b->get_mode()==Physics2DServer::BODY_MODE_KINEMATIC) {
+			b=b->get_island_next();
 			continue; //ignore for static
+		}
 
 		bool active = b->is_active();
 
@@ -132,6 +136,8 @@ void Step2DSW::step(Space2DSW* p_space,float p_delta,int p_iterations) {
 		b=b->next();
 		active_count++;
 	}
+
+	p_space->set_active_objects(active_count);
 
 	/* GENERATE CONSTRAINT ISLANDS */
 
@@ -163,6 +169,8 @@ void Step2DSW::step(Space2DSW* p_space,float p_delta,int p_iterations) {
 		}
 		b=b->next();
 	}
+
+	p_space->set_island_count(island_count);
 
 	const SelfList<Area2DSW>::List &aml = p_space->get_moved_area_list();
 
@@ -210,8 +218,9 @@ void Step2DSW::step(Space2DSW* p_space,float p_delta,int p_iterations) {
 	b = body_list->first();
 	while(b) {
 
+		const SelfList<Body2DSW>*n=b->next();
 		b->self()->integrate_velocities(p_delta);
-		b=b->next();
+		b=n;  // in case it shuts itself down
 	}
 
 	/* SLEEP / WAKE UP ISLANDS */

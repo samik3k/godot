@@ -30,9 +30,11 @@
 #include "print_string.h"
 //#define DEBUG_XML
 
+VARIANT_ENUM_CAST(XMLParser::NodeType);
+
 static bool _equalsn(const CharType* str1, const CharType* str2, int len) {
 	int i;
-	for(i=0; str1[i] && str2[i] && i < len; ++i)
+	for(i=0; i < len && str1[i] && str2[i] ; ++i)
 	     if (str1[i] != str2[i])
 		     return false;
 
@@ -392,7 +394,8 @@ void XMLParser::_bind_methods() {
 	ObjectTypeDB::bind_method(_MD("get_current_line"),&XMLParser::get_current_line);
 	ObjectTypeDB::bind_method(_MD("skip_section"),&XMLParser::skip_section);
 	ObjectTypeDB::bind_method(_MD("seek"),&XMLParser::seek);
-	ObjectTypeDB::bind_method(_MD("open"),&XMLParser::open);
+	ObjectTypeDB::bind_method(_MD("open","file"),&XMLParser::open);
+	ObjectTypeDB::bind_method(_MD("open_buffer","buffer"),&XMLParser::open_buffer);
 
 	BIND_CONSTANT( NODE_NONE );
 	BIND_CONSTANT( NODE_ELEMENT );
@@ -491,6 +494,19 @@ String XMLParser::get_attribute_value_safe(const String& p_name) const {
 bool XMLParser::is_empty() const {
 
 	return node_empty;
+}
+
+Error XMLParser::open_buffer(const Vector<uint8_t>& p_buffer) {
+
+	ERR_FAIL_COND_V(p_buffer.size()==0,ERR_INVALID_DATA);
+
+	length = p_buffer.size();
+	data = memnew_arr( char, length+1);
+	copymem(data,p_buffer.ptr(),length);
+	data[length]=0;
+	P=data;
+	return OK;
+
 }
 
 Error XMLParser::open(const String& p_path) {

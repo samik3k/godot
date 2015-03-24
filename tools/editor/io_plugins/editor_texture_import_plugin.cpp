@@ -44,6 +44,10 @@ static const char *flag_names[]={
 	"No MipMaps",
 	"Repeat",
 	"Filter (Magnifying)",
+	"Premultiply Alpha",
+	"Convert SRGB->Linear",
+	"Convert NormalMap to XY",
+	"Use Anisotropy",
 	NULL
 };
 
@@ -55,6 +59,10 @@ static const char *flag_short_names[]={
 	"NoMipMap",
 	"Repeat",
 	"Filter",
+	"PMAlpha",
+	"ToLinear",
+	"ToRG",
+	"Anisoropic",
 	NULL
 };
 
@@ -143,11 +151,16 @@ void EditorImportTextureOptions::_bind_methods() {
 
 void EditorImportTextureOptions::_notification(int p_what) {
 
-	if (p_what==NOTIFICATION_ENTER_SCENE) {
+	if (p_what==NOTIFICATION_ENTER_TREE) {
 
 		flags->connect("item_edited",this,"_changed");
 		format->connect("item_selected",this,"_changedp");
 	}
+}
+
+void EditorImportTextureOptions::show_2d_notice() {
+
+	notice_for_2d->show();
 }
 
 EditorImportTextureOptions::EditorImportTextureOptions() {
@@ -206,6 +219,14 @@ EditorImportTextureOptions::EditorImportTextureOptions() {
 
 
 	add_margin_child("Texture Options",flags,true);
+
+	notice_for_2d = memnew( Label );
+	notice_for_2d->set_text("NOTICE: You are not forced to import textures for 2D projects. Just copy your .jpg or .png files to your project, and change export options later. Atlases can be generated on export too.");
+	notice_for_2d->set_custom_minimum_size(Size2(0,50));
+	notice_for_2d->set_autowrap(true);
+	add_child(notice_for_2d);
+	notice_for_2d->hide();
+
 }
 
 ///////////////////////////////////////////////////////////
@@ -390,7 +411,11 @@ void EditorTextureImportDialog::popup_import(const String& p_from) {
 		Ref<ResourceImportMetadata> rimd = ResourceLoader::load_import_metadata(p_from);
 		ERR_FAIL_COND(!rimd.is_valid());
 
-		save_path->set_text(p_from.get_base_dir());
+		if (plugin->get_mode()==EditorTextureImportPlugin::MODE_ATLAS)
+			save_path->set_text(p_from);
+		else
+			save_path->set_text(p_from.get_base_dir());
+
 		texture_options->set_format(EditorTextureImportPlugin::ImageFormat(int(rimd->get_option("format"))));
 		texture_options->set_flags(rimd->get_option("flags"));
 		texture_options->set_quality(rimd->get_option("quality"));
@@ -408,7 +433,7 @@ void EditorTextureImportDialog::popup_import(const String& p_from) {
 void EditorTextureImportDialog::_notification(int p_what) {
 
 
-	if (p_what==NOTIFICATION_ENTER_SCENE) {
+	if (p_what==NOTIFICATION_ENTER_TREE) {
 
 
 		List<String> extensions;
@@ -530,6 +555,7 @@ EditorTextureImportDialog::EditorTextureImportDialog(EditorTextureImportPlugin* 
 		texture_options->set_flags(EditorTextureImportPlugin::IMAGE_FLAG_FIX_BORDER_ALPHA|EditorTextureImportPlugin::IMAGE_FLAG_NO_MIPMAPS|EditorTextureImportPlugin::IMAGE_FLAG_FILTER);
 		texture_options->set_quality(0.7);
 		texture_options->set_format(EditorTextureImportPlugin::IMAGE_FORMAT_COMPRESS_DISK_LOSSY);
+		texture_options->show_2d_notice();
 		set_title("Import Textures for Atlas (2D)");
 
 	} else if (p_2d) {
@@ -537,6 +563,7 @@ EditorTextureImportDialog::EditorTextureImportDialog(EditorTextureImportPlugin* 
 		texture_options->set_flags(EditorTextureImportPlugin::IMAGE_FLAG_NO_MIPMAPS|EditorTextureImportPlugin::IMAGE_FLAG_FIX_BORDER_ALPHA|EditorTextureImportPlugin::IMAGE_FLAG_FILTER);
 		texture_options->set_quality(0.7);
 		texture_options->set_format(EditorTextureImportPlugin::IMAGE_FORMAT_COMPRESS_DISK_LOSSY);
+		texture_options->show_2d_notice();
 		set_title("Import Textures for 2D");
 	} else {
 
@@ -595,7 +622,7 @@ String EditorTextureImportPlugin::get_visible_name() const {
 		} break;
 		case MODE_ATLAS: {
 
-			return "Atlas Teture";
+			return "Atlas Texture";
 		} break;
 
 	}
@@ -706,6 +733,7 @@ Error EditorTextureImportPlugin::import2(const String& p_path, const Ref<Resourc
 	bool atlas = from->get_option("atlas");
 
 	int flags=from->get_option("flags");
+
 	uint32_t tex_flags=0;
 
 	if (flags&EditorTextureImportPlugin::IMAGE_FLAG_REPEAT)
@@ -714,7 +742,12 @@ Error EditorTextureImportPlugin::import2(const String& p_path, const Ref<Resourc
 		tex_flags|=Texture::FLAG_FILTER;
 	if (!(flags&EditorTextureImportPlugin::IMAGE_FLAG_NO_MIPMAPS))
 		tex_flags|=Texture::FLAG_MIPMAPS;
+	if (flags&EditorTextureImportPlugin::IMAGE_FLAG_CONVERT_TO_LINEAR)
+		tex_flags|=Texture::FLAG_CONVERT_TO_LINEAR;
+	if (flags&EditorTextureImportPlugin::IMAGE_FLAG_USE_ANISOTROPY)
+		tex_flags|=Texture::FLAG_ANISOTROPIC_FILTER;
 
+	print_line("path: "+p_path+" flags: "+itos(tex_flags));
 	int shrink=1;
 	if (from->has_option("shrink"))
 		shrink=from->get_option("shrink");
@@ -732,8 +765,10 @@ Error EditorTextureImportPlugin::import2(const String& p_path, const Ref<Resourc
 		for(int i=0;i<from->get_source_count();i++) {
 
 			String path = EditorImportPlugin::expand_source_path(from->get_source_path(i));
+			String md5 = FileAccess::get_md5(path);
+			from->set_source_md5(i,FileAccess::get_md5(path));
 			ep.step("Loading Image: "+path,i);
-			print_line("source path: "+path);
+			print_line("source path: "+path+" md5 "+md5);
 			Image src;
 			Error err = ImageLoader::load_image(path,&src);
 			if (err) {
@@ -879,10 +914,11 @@ Error EditorTextureImportPlugin::import2(const String& p_path, const Ref<Resourc
 					EditorNode::add_io_error("Couldn't save atlas image: "+apath);
 					return err;
 				}
-				from->set_source_md5(i,FileAccess::get_md5(apath));
+				//from->set_source_md5(i,FileAccess::get_md5(apath));
 			}
 		}
 	}
+
 
 	if (format==IMAGE_FORMAT_COMPRESS_DISK_LOSSLESS || format==IMAGE_FORMAT_COMPRESS_DISK_LOSSY) {
 
@@ -901,6 +937,19 @@ Error EditorTextureImportPlugin::import2(const String& p_path, const Ref<Resourc
 			image.fix_alpha_edges();
 		}
 
+		if (image.get_format()==Image::FORMAT_RGBA && flags&IMAGE_FLAG_PREMULT_ALPHA) {
+
+			image.premultiply_alpha();
+		}
+
+		if (flags&IMAGE_FLAG_CONVERT_NORMAL_TO_XY) {
+			image.normalmap_to_xy();
+		}
+
+		//if ((image.get_format()==Image::FORMAT_RGB || image.get_format()==Image::FORMAT_RGBA) && flags&IMAGE_FLAG_CONVERT_TO_LINEAR) {
+
+		//	image.srgb_to_linear();
+		//}
 
 		if (shrink>1) {
 
@@ -937,6 +986,7 @@ Error EditorTextureImportPlugin::import2(const String& p_path, const Ref<Resourc
 
 	} else {
 
+
 		Image image=texture->get_data();
 		ERR_FAIL_COND_V(image.empty(),ERR_INVALID_DATA);
 
@@ -952,6 +1002,21 @@ Error EditorTextureImportPlugin::import2(const String& p_path, const Ref<Resourc
 
 			image.fix_alpha_edges();
 		}
+
+		if (image.get_format()==Image::FORMAT_RGBA && flags&IMAGE_FLAG_PREMULT_ALPHA) {
+
+			image.premultiply_alpha();
+		}
+
+		if (flags&IMAGE_FLAG_CONVERT_NORMAL_TO_XY) {
+			image.normalmap_to_xy();
+		}
+
+		//if ((image.get_format()==Image::FORMAT_RGB || image.get_format()==Image::FORMAT_RGBA) && flags&IMAGE_FLAG_CONVERT_TO_LINEAR) {
+//
+		//	print_line("CONVERT BECAUSE: "+itos(flags));
+		//	image.srgb_to_linear();
+		//}
 
 		int orig_w=image.get_width();
 		int orig_h=image.get_height();
@@ -975,11 +1040,14 @@ Error EditorTextureImportPlugin::import2(const String& p_path, const Ref<Resourc
 
 		texture->create_from_image(image,tex_flags);
 
-		if (shrink>1) {
+
+		if (shrink>1 || (format!=IMAGE_FORMAT_UNCOMPRESSED && (image.get_width()!=orig_w || image.get_height()!=orig_h))) {
 			texture->set_size_override(Size2(orig_w,orig_h));
 		}
 
-		Error err = ResourceSaver::save(p_path,texture);
+		uint32_t save_flags=ResourceSaver::FLAG_COMPRESS;
+
+		Error err = ResourceSaver::save(p_path,texture,save_flags);
 		if (err!=OK) {
 			EditorNode::add_io_error("Couldn't save converted texture: "+p_path);
 			return err;
@@ -1006,6 +1074,7 @@ Vector<uint8_t> EditorTextureImportPlugin::custom_export(const String& p_path, c
 			int group_format=0;
 			float group_lossy_quality=EditorImportExport::get_singleton()->image_export_group_get_lossy_quality(group);
 			int group_shrink=EditorImportExport::get_singleton()->image_export_group_get_shrink(group);
+			group_shrink*=EditorImportExport::get_singleton()->get_export_image_shrink();
 
 			switch(EditorImportExport::get_singleton()->image_export_group_get_image_action(group)) {
 				case EditorImportExport::IMAGE_ACTION_NONE: {
@@ -1038,21 +1107,22 @@ Vector<uint8_t> EditorTextureImportPlugin::custom_export(const String& p_path, c
 
 			int flags=0;
 
-			if (Globals::get_singleton()->get("texture_import/filter"))
+			if (Globals::get_singleton()->get("image_loader/filter"))
 				flags|=IMAGE_FLAG_FILTER;
-			if (!Globals::get_singleton()->get("texture_import/gen_mipmaps"))
+			if (!Globals::get_singleton()->get("image_loader/gen_mipmaps"))
 				flags|=IMAGE_FLAG_NO_MIPMAPS;
-			if (!Globals::get_singleton()->get("texture_import/repeat"))
+			if (!Globals::get_singleton()->get("image_loader/repeat"))
 				flags|=IMAGE_FLAG_REPEAT;
 
 			flags|=IMAGE_FLAG_FIX_BORDER_ALPHA;
 
+			print_line("group format"+itos(group_format));
 			rimd->set_option("format",group_format);
 			rimd->set_option("flags",flags);
 			rimd->set_option("quality",group_lossy_quality);
 			rimd->set_option("atlas",false);
 			rimd->set_option("shrink",group_shrink);
-			rimd->add_source(EditorImportPlugin::validate_source_path(p_path));
+			rimd->add_source(EditorImportPlugin::validate_source_path(p_path),FileAccess::get_md5(p_path));
 
 		} else if (EditorImportExport::get_singleton()->get_image_formats().has(p_path.extension().to_lower()) && EditorImportExport::get_singleton()->get_export_image_action()!=EditorImportExport::IMAGE_ACTION_NONE) {
 			//handled by general image export settings
@@ -1066,19 +1136,20 @@ Vector<uint8_t> EditorTextureImportPlugin::custom_export(const String& p_path, c
 
 			int flags=0;
 
-			if (Globals::get_singleton()->get("texture_import/filter"))
+			if (Globals::get_singleton()->get("image_loader/filter"))
 				flags|=IMAGE_FLAG_FILTER;
-			if (!Globals::get_singleton()->get("texture_import/gen_mipmaps"))
+			if (!Globals::get_singleton()->get("image_loader/gen_mipmaps"))
 				flags|=IMAGE_FLAG_NO_MIPMAPS;
-			if (!Globals::get_singleton()->get("texture_import/repeat"))
+			if (!Globals::get_singleton()->get("image_loader/repeat"))
 				flags|=IMAGE_FLAG_REPEAT;
 
 			flags|=IMAGE_FLAG_FIX_BORDER_ALPHA;
 
+			rimd->set_option("shrink",EditorImportExport::get_singleton()->get_export_image_shrink());
 			rimd->set_option("flags",flags);
 			rimd->set_option("quality",EditorImportExport::get_singleton()->get_export_image_quality());
 			rimd->set_option("atlas",false);
-			rimd->add_source(EditorImportPlugin::validate_source_path(p_path));
+			rimd->add_source(EditorImportPlugin::validate_source_path(p_path),FileAccess::get_md5(p_path));
 
 		} else {
 			return Vector<uint8_t>();
@@ -1093,24 +1164,30 @@ Vector<uint8_t> EditorTextureImportPlugin::custom_export(const String& p_path, c
 	}
 
 	uint32_t flags = rimd->get_option("flags");
+	uint8_t shrink = rimd->has_option("shrink") ? rimd->get_option("shrink"): Variant(1);	
+	uint8_t format = rimd->get_option("format");
+	uint8_t comp = (format==EditorTextureImportPlugin::IMAGE_FORMAT_COMPRESS_RAM)?uint8_t(p_platform->get_image_compression()):uint8_t(255);
 
 	MD5_CTX ctx;
 	uint8_t f4[4];
 	encode_uint32(flags,&f4[0]);
-	uint8_t ic = p_platform->get_image_compression();
 	MD5Init(&ctx);
 	String gp = Globals::get_singleton()->globalize_path(p_path);
 	CharString cs = gp.utf8();
 	MD5Update(&ctx,(unsigned char*)cs.get_data(),cs.length());
 	MD5Update(&ctx,f4,4);
-	MD5Update(&ctx,&ic,1);
-
+	MD5Update(&ctx,&format,1);
+	MD5Update(&ctx,&comp,1);
+	MD5Update(&ctx,&shrink,1);
 	MD5Final(&ctx);
+
+
 
 	uint64_t sd=0;
 	String smd5;
 
 	String md5 = String::md5(ctx.digest);
+	print_line(p_path+" MD5: "+md5+" FLAGS: "+itos(flags));
 
 	String tmp_path = EditorSettings::get_singleton()->get_settings_path().plus_file("tmp/");
 
@@ -1122,6 +1199,7 @@ Vector<uint8_t> EditorTextureImportPlugin::custom_export(const String& p_path, c
 
 			uint64_t d = f->get_line().strip_edges().to_int64();
 			sd = FileAccess::get_modified_time(p_path);
+
 			if (d==sd) {
 				valid=true;
 			} else {
@@ -1173,5 +1251,61 @@ EditorTextureImportPlugin::EditorTextureImportPlugin(EditorNode *p_editor, Mode 
 	mode=p_mode;
 	dialog = memnew( EditorTextureImportDialog(this,p_mode==MODE_TEXTURE_2D || p_mode==MODE_ATLAS,p_mode==MODE_ATLAS) );
 	editor->get_gui_base()->add_child(dialog);
+
+}
+
+////////////////////////////
+
+
+ Vector<uint8_t> EditorTextureExportPlugin::custom_export(String& p_path,const Ref<EditorExportPlatform> &p_platform) {
+
+	Ref<ResourceImportMetadata> rimd = ResourceLoader::load_import_metadata(p_path);
+
+	if (rimd.is_valid()) {
+
+		if (rimd->get_editor()!="") {
+			int compression = rimd->get_option("format");
+			if (compression!=EditorTextureImportPlugin::IMAGE_FORMAT_COMPRESS_RAM)
+				return Vector<uint8_t>(); //only useful for RAM compression to reconvert
+			Ref<EditorImportPlugin> pl = EditorImportExport::get_singleton()->get_import_plugin_by_name(rimd->get_editor());
+			if (pl.is_valid()) {
+				Vector<uint8_t> ce = pl->custom_export(p_path,p_platform);
+				if (ce.size())
+					return ce;
+			}
+		}
+	} else if (EditorImportExport::get_singleton()->image_get_export_group(p_path)) {
+
+
+		Ref<EditorImportPlugin> pl = EditorImportExport::get_singleton()->get_import_plugin_by_name("texture_2d");
+		if (pl.is_valid()) {
+			Vector<uint8_t> ce = pl->custom_export(p_path,p_platform);
+			if (ce.size()) {
+				p_path=p_path.basename()+".tex";
+				return ce;
+			}
+		}
+
+	} else if (EditorImportExport::get_singleton()->get_export_image_action()!=EditorImportExport::IMAGE_ACTION_NONE){
+
+		String xt = p_path.extension().to_lower();
+		if (EditorImportExport::get_singleton()->get_image_formats().has(xt)) { //should check for more I guess?
+
+			Ref<EditorImportPlugin> pl = EditorImportExport::get_singleton()->get_import_plugin_by_name("texture_2d");
+			if (pl.is_valid()) {
+				Vector<uint8_t> ce = pl->custom_export(p_path,p_platform);
+				if (ce.size()) {
+					p_path=p_path.basename()+".tex";
+					return ce;
+				}
+			}
+		}
+	}
+
+	return Vector<uint8_t>();
+}
+
+EditorTextureExportPlugin::EditorTextureExportPlugin() {
+
 
 }

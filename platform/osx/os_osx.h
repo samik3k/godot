@@ -98,7 +98,7 @@ public:
 	id context;
 
 	CursorShape cursor_shape;
-
+	MouseMode mouse_mode;
 protected:
 
 	virtual int get_video_driver_count() const;
@@ -129,9 +129,12 @@ public:
 	virtual void set_mouse_show(bool p_show);
 	virtual void set_mouse_grab(bool p_grab);
 	virtual bool is_mouse_grab_enabled() const;
+	virtual void warp_mouse_pos(const Point2& p_to);
 	virtual Point2 get_mouse_pos() const;
 	virtual int get_mouse_button_state() const;
 	virtual void set_window_title(const String& p_title);
+	
+	virtual Size2 get_window_size() const;
 
 	virtual void set_icon(const Image& p_icon);
 
@@ -155,10 +158,14 @@ public:
 
 	virtual String get_executable_path() const;
 
+	virtual LatinKeyboardVariant get_latin_keyboard_variant() const;
+
 	virtual void move_window_to_foreground();
 
 	void run();
 
+    void set_mouse_mode(MouseMode p_mode);
+    MouseMode get_mouse_mode() const;
 
 	OS_OSX();
 };

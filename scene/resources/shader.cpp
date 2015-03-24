@@ -33,21 +33,15 @@
 #include "scene/scene_string_names.h"
 
 
-void Shader::set_mode(Mode p_mode) {
-
-	ERR_FAIL_INDEX(p_mode,2);
-	VisualServer::get_singleton()->shader_set_mode(shader,VisualServer::ShaderMode(p_mode));
-	emit_signal(SceneStringNames::get_singleton()->changed);
-}
 
 Shader::Mode Shader::get_mode() const {
 
 	return (Mode)VisualServer::get_singleton()->shader_get_mode(shader);
 }
 
-void Shader::set_code( const String& p_vertex, const String& p_fragment, int p_vertex_ofs,int p_fragment_ofs) {
+void Shader::set_code( const String& p_vertex, const String& p_fragment, const String& p_light,int p_fragment_ofs,int p_light_ofs) {
 
-	VisualServer::get_singleton()->shader_set_code(shader,p_vertex,p_fragment,p_vertex_ofs,p_fragment_ofs);
+	VisualServer::get_singleton()->shader_set_code(shader,p_vertex,p_fragment,p_light,0,p_fragment_ofs,p_light_ofs);
 	params_cache_dirty=true;
 	emit_signal(SceneStringNames::get_singleton()->changed);
 }
@@ -64,6 +58,11 @@ String Shader::get_fragment_code() const {
 
 }
 
+String Shader::get_light_code() const {
+
+	return VisualServer::get_singleton()->shader_get_light_code(shader);
+
+}
 
 bool Shader::has_param(const StringName& p_param) const {
 
@@ -85,7 +84,7 @@ void Shader::get_param_list(List<PropertyInfo> *p_params) const {
 	for(List<PropertyInfo>::Element *E=local.front();E;E=E->next()) {
 
 		PropertyInfo pi=E->get();
-		pi.name="param/"+pi.name;
+		pi.name="shader_param/"+pi.name;
 		params_cache[pi.name]=E->get().name;
 		if (p_params) {
 
@@ -106,12 +105,22 @@ Dictionary Shader::_get_code() {
 
 	String fs = VisualServer::get_singleton()->shader_get_fragment_code(shader);
 	String vs = VisualServer::get_singleton()->shader_get_vertex_code(shader);
+	String ls = VisualServer::get_singleton()->shader_get_light_code(shader);
 
 	Dictionary c;
 	c["fragment"]=fs;
 	c["fragment_ofs"]=0;
 	c["vertex"]=vs;
 	c["vertex_ofs"]=0;
+	c["light"]=ls;
+	c["light_ofs"]=0;
+	Array arr;
+	for(const Map<StringName,Ref<Texture> >::Element *E=default_textures.front();E;E=E->next()) {
+		arr.push_back(E->key());
+		arr.push_back(E->get());
+	}
+	if (arr.size())
+		c["default_tex"]=arr;
 	return c;
 }
 
@@ -119,18 +128,60 @@ void Shader::_set_code(const Dictionary& p_string) {
 
 	ERR_FAIL_COND(!p_string.has("fragment"));
 	ERR_FAIL_COND(!p_string.has("vertex"));
+	String light;
+	if (p_string.has("light"))
+		light=p_string["light"];
 
-	set_code(p_string["vertex"],p_string["fragment"]);
+	set_code(p_string["vertex"],p_string["fragment"],light);
+	if (p_string.has("default_tex")) {
+		Array arr=p_string["default_tex"];
+		if ((arr.size()&1)==0) {
+			for(int i=0;i<arr.size();i+=2)
+				set_default_texture_param(arr[i],arr[i+1]);
+		}
+	}
 }
+
+void Shader::set_default_texture_param(const StringName& p_param,const Ref<Texture>& p_texture) {
+
+	if (p_texture.is_valid()) {
+		default_textures[p_param]=p_texture;
+		VS::get_singleton()->shader_set_default_texture_param(shader,p_param,p_texture->get_rid());
+	} else {
+		default_textures.erase(p_param);
+		VS::get_singleton()->shader_set_default_texture_param(shader,p_param,RID());
+	}
+}
+
+Ref<Texture> Shader::get_default_texture_param(const StringName& p_param) const{
+
+	if (default_textures.has(p_param))
+		return default_textures[p_param];
+	else
+		return Ref<Texture>();
+}
+
+void Shader::get_default_texture_param_list(List<StringName>* r_textures) const{
+
+	for(const Map<StringName,Ref<Texture> >::Element *E=default_textures.front();E;E=E->next()) {
+
+		r_textures->push_back(E->key());
+	}
+
+}
+
 
 void Shader::_bind_methods() {
 
-	ObjectTypeDB::bind_method(_MD("set_mode","mode"),&Shader::set_mode);
 	ObjectTypeDB::bind_method(_MD("get_mode"),&Shader::get_mode);
 
-	ObjectTypeDB::bind_method(_MD("set_code","vcode","fcode","vofs","fofs"),&Shader::set_code,DEFVAL(0),DEFVAL(0));
+	ObjectTypeDB::bind_method(_MD("set_code","vcode","fcode","lcode","fofs","lofs"),&Shader::set_code,DEFVAL(0),DEFVAL(0));
 	ObjectTypeDB::bind_method(_MD("get_vertex_code"),&Shader::get_vertex_code);
 	ObjectTypeDB::bind_method(_MD("get_fragment_code"),&Shader::get_fragment_code);
+	ObjectTypeDB::bind_method(_MD("get_light_code"),&Shader::get_light_code);
+
+	ObjectTypeDB::bind_method(_MD("set_default_texture_param","param","texture:Texture"),&Shader::set_default_texture_param);
+	ObjectTypeDB::bind_method(_MD("get_default_texture_param:Texture","param"),&Shader::get_default_texture_param);
 
 	ObjectTypeDB::bind_method(_MD("has_param","name"),&Shader::has_param);
 
@@ -148,9 +199,9 @@ void Shader::_bind_methods() {
 
 }
 
-Shader::Shader() {
+Shader::Shader(Mode p_mode) {
 
-	shader = VisualServer::get_singleton()->shader_create();
+	shader = VisualServer::get_singleton()->shader_create(VS::ShaderMode(p_mode));
 	params_cache_dirty=true;
 }
 
@@ -169,6 +220,7 @@ RES ResourceFormatLoaderShader::load(const String &p_path,const String& p_origin
 
 	String fragment_code;
 	String vertex_code;
+	String light_code;
 
 	int mode=-1;
 
@@ -181,7 +233,7 @@ RES ResourceFormatLoaderShader::load(const String &p_path,const String& p_origin
 	String base_path = p_path.get_base_dir();
 
 
-	Ref<Shader> shader( memnew( Shader ) );
+	Ref<Shader> shader;//( memnew( Shader ) );
 
 	int line=0;
 
@@ -377,7 +429,7 @@ RES ResourceFormatLoaderShader::load(const String &p_path,const String& p_origin
 		}
 	}
 
-	shader->set_code(vertex_code,fragment_code);
+	shader->set_code(vertex_code,fragment_code,light_code);
 
 	f->close();
 	memdelete(f);

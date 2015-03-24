@@ -4,6 +4,7 @@
 #include "io/marshalls.h"
 #include "io/base64.h"
 #include "core/globals.h"
+#include "io/file_access_encrypted.h"
 
 _ResourceLoader *_ResourceLoader::singleton=NULL;
 
@@ -11,9 +12,9 @@ Ref<ResourceInteractiveLoader> _ResourceLoader::load_interactive(const String& p
 	return ResourceLoader::load_interactive(p_path,p_type_hint);
 }
 
-RES _ResourceLoader::load(const String &p_path,const String& p_type_hint) {
+RES _ResourceLoader::load(const String &p_path,const String& p_type_hint, bool p_no_cache) {
 
-	RES ret =  ResourceLoader::load(p_path,p_type_hint);
+	RES ret =  ResourceLoader::load(p_path,p_type_hint, p_no_cache);
 	return ret;
 }
 
@@ -58,7 +59,7 @@ void _ResourceLoader::_bind_methods() {
 
 
 	ObjectTypeDB::bind_method(_MD("load_interactive:ResourceInteractiveLoader","path","type_hint"),&_ResourceLoader::load_interactive,DEFVAL(""));
-	ObjectTypeDB::bind_method(_MD("load:Resource","path","type_hint"),&_ResourceLoader::load,DEFVAL(""));
+	ObjectTypeDB::bind_method(_MD("load:Resource","path","type_hint", "p_no_cache"),&_ResourceLoader::load,DEFVAL(""), DEFVAL(false));
 	ObjectTypeDB::bind_method(_MD("get_recognized_extensions_for_type","type"),&_ResourceLoader::get_recognized_extensions_for_type);
 	ObjectTypeDB::bind_method(_MD("set_abort_on_missing_resources","abort"),&_ResourceLoader::set_abort_on_missing_resources);
 	ObjectTypeDB::bind_method(_MD("get_dependencies"),&_ResourceLoader::get_dependencies);
@@ -97,6 +98,13 @@ void _ResourceSaver::_bind_methods() {
 
 	ObjectTypeDB::bind_method(_MD("save","path","resource:Resource"),&_ResourceSaver::save, DEFVAL(0));
 	ObjectTypeDB::bind_method(_MD("get_recognized_extensions","type"),&_ResourceSaver::get_recognized_extensions);
+
+	BIND_CONSTANT(FLAG_RELATIVE_PATHS);
+	BIND_CONSTANT(FLAG_BUNDLE_RESOURCES);
+	BIND_CONSTANT(FLAG_CHANGE_PATH);
+	BIND_CONSTANT(FLAG_OMIT_EDITOR_PROPERTIES);
+	BIND_CONSTANT(FLAG_SAVE_BIG_ENDIAN);
+	BIND_CONSTANT(FLAG_COMPRESS);
 }
 
 _ResourceSaver::_ResourceSaver() {
@@ -168,12 +176,86 @@ bool _OS::is_video_mode_fullscreen(int p_screen) const {
 
 }
 
+
+int _OS::get_screen_count() const {
+	return OS::get_singleton()->get_screen_count();
+}
+
+int _OS::get_current_screen() const {
+	return OS::get_singleton()->get_current_screen();
+}
+
+void _OS::set_current_screen(int p_screen) {
+	OS::get_singleton()->set_current_screen(p_screen);
+}
+
+Point2 _OS::get_screen_position(int p_screen) const {
+	return OS::get_singleton()->get_screen_position(p_screen);
+}
+
+Size2 _OS::get_screen_size(int p_screen) const {
+	return OS::get_singleton()->get_screen_size(p_screen);
+}
+
+Point2 _OS::get_window_position() const {
+	return OS::get_singleton()->get_window_position();
+}
+
+void _OS::set_window_position(const Point2& p_position) {
+	OS::get_singleton()->set_window_position(p_position);
+}
+
+Size2 _OS::get_window_size() const {
+	return OS::get_singleton()->get_window_size();
+}
+
+void _OS::set_window_size(const Size2& p_size) {
+	OS::get_singleton()->set_window_size(p_size);
+}
+
+void _OS::set_window_fullscreen(bool p_enabled) {
+	OS::get_singleton()->set_window_fullscreen(p_enabled);
+}
+
+bool _OS::is_window_fullscreen() const {
+	return OS::get_singleton()->is_window_fullscreen();
+}
+
+void _OS::set_window_resizable(bool p_enabled) {
+	OS::get_singleton()->set_window_resizable(p_enabled);
+}
+
+bool _OS::is_window_resizable() const {
+	return OS::get_singleton()->is_window_resizable();
+}
+
+void _OS::set_window_minimized(bool p_enabled) {
+	OS::get_singleton()->set_window_minimized(p_enabled);
+}
+
+bool _OS::is_window_minimized() const {
+	return OS::get_singleton()->is_window_minimized();
+}
+
+void _OS::set_window_maximized(bool p_enabled) {
+	OS::get_singleton()->set_window_maximized(p_enabled);
+}
+
+bool _OS::is_window_maximized() const {
+	return OS::get_singleton()->is_window_maximized();
+}
+
+
+void _OS::set_use_file_access_save_and_swap(bool p_enable) {
+
+	FileAccess::set_backup_save(p_enable);
+}
+
 bool _OS::is_video_mode_resizable(int p_screen) const {
 
 	OS::VideoMode vm;
 	vm = OS::get_singleton()->get_video_mode(p_screen);
 	return vm.resizable;
-
 }
 
 Array _OS::get_fullscreen_mode_list(int p_screen) const {
@@ -199,6 +281,14 @@ int _OS::get_iterations_per_second() const {
 
 }
 
+void _OS::set_target_fps(int p_fps) {
+	OS::get_singleton()->set_target_fps(p_fps);
+}
+
+float _OS::get_target_fps() const {
+	return OS::get_singleton()->get_target_fps();
+}
+
 void _OS::set_low_processor_usage_mode(bool p_enabled) {
 
 	OS::get_singleton()->set_low_processor_usage_mode(p_enabled);
@@ -219,7 +309,7 @@ Error _OS::shell_open(String p_uri) {
 };
 
 
-int _OS::execute(const String& p_path, const Vector<String> & p_arguments,bool p_blocking) {
+int _OS::execute(const String& p_path, const Vector<String> & p_arguments, bool p_blocking, Array p_output) {
 
 	OS::ProcessID pid;
 	List<String> args;
@@ -227,6 +317,8 @@ int _OS::execute(const String& p_path, const Vector<String> & p_arguments,bool p
 		args.push_back(p_arguments[i]);
 	String pipe;
 	Error err = OS::get_singleton()->execute(p_path,args,p_blocking,&pid, &pipe);
+	p_output.clear();
+	p_output.push_back(pipe);
 	if (err != OK)
 		return -1;
 	else
@@ -237,6 +329,12 @@ Error _OS::kill(int p_pid) {
 
 	return OS::get_singleton()->kill(p_pid);
 }
+
+int _OS::get_process_ID() const {
+
+	return OS::get_singleton()->get_process_ID();
+};
+
 
 bool _OS::has_environment(const String& p_var) const {
 
@@ -277,6 +375,21 @@ MainLoop *_OS::get_main_loop() const {
 
 	return OS::get_singleton()->get_main_loop();
 }
+
+void _OS::set_time_scale(float p_scale) {
+	OS::get_singleton()->set_time_scale(p_scale);
+}
+
+float _OS::get_time_scale() {
+
+	return OS::get_singleton()->get_time_scale();
+}
+
+bool _OS::is_ok_left_and_cancel_right() const {
+
+	return OS::get_singleton()->get_swap_ok_cancel();
+}
+
 /*
 enum Weekday {
 	DAY_SUNDAY,
@@ -387,6 +500,12 @@ uint32_t _OS::get_ticks_msec() const {
 	return OS::get_singleton()->get_ticks_msec();
 }
 
+
+bool _OS::can_use_threads() const {
+
+	return OS::get_singleton()->can_use_threads();
+}
+
 bool _OS::can_draw() const {
 
 	return OS::get_singleton()->can_draw();
@@ -413,6 +532,100 @@ void _OS::dump_memory_to_file(const String& p_file) {
 	OS::get_singleton()->dump_memory_to_file(p_file.utf8().get_data());
 }
 
+struct _OSCoreBindImg {
+
+	String path;
+	Size2 size;
+	int fmt;
+	ObjectID id;
+	int vram;
+	bool operator<(const _OSCoreBindImg& p_img) const { return vram==p_img.vram ? id<p_img.id : vram > p_img.vram; }
+};
+
+void _OS::print_all_textures_by_size() {
+
+
+	List<_OSCoreBindImg> imgs;
+	int total=0;
+	{
+		List<Ref<Resource> > rsrc;
+		ResourceCache::get_cached_resources(&rsrc);
+
+		for (List<Ref<Resource> >::Element *E=rsrc.front();E;E=E->next()) {
+
+			if (!E->get()->is_type("ImageTexture"))
+				continue;
+
+			Size2 size = E->get()->call("get_size");
+			int fmt = E->get()->call("get_format");
+
+			_OSCoreBindImg img;
+			img.size=size;
+			img.fmt=fmt;
+			img.path=E->get()->get_path();
+			img.vram=Image::get_image_data_size(img.size.width,img.size.height,Image::Format(img.fmt));
+			img.id=E->get()->get_instance_ID();
+			total+=img.vram;
+			imgs.push_back(img);
+		}
+	}
+
+	imgs.sort();
+
+	for(List<_OSCoreBindImg>::Element *E=imgs.front();E;E=E->next()) {
+
+		print_line(E->get().path+" - "+String::humanize_size(E->get().vram)+"  ("+E->get().size+") - total:"+String::humanize_size(total) );
+		total-=E->get().vram;
+	}
+}
+
+void _OS::print_resources_by_type(const Vector<String>& p_types) {
+
+	Map<String,int> type_count;
+
+	List<Ref<Resource> > resources;
+	ResourceCache::get_cached_resources(&resources);
+
+	List<Ref<Resource> > rsrc;
+	ResourceCache::get_cached_resources(&rsrc);
+
+	for (List<Ref<Resource> >::Element *E=rsrc.front();E;E=E->next()) {
+
+		Ref<Resource> r = E->get();
+
+		bool found = false;
+
+		for (int i=0; i<p_types.size(); i++) {
+			if (r->is_type(p_types[i]))
+				found = true;
+		}
+		if (!found)
+			continue;
+
+		if (!type_count.has(r->get_type())) {
+			type_count[r->get_type()]=0;
+		}
+
+
+		type_count[r->get_type()]++;
+
+		print_line(r->get_type()+": "+r->get_path());
+
+		List<String> metas;
+		r->get_meta_list(&metas);
+		for (List<String>::Element* me = metas.front(); me; me = me->next()) {
+			print_line(" "+String(me->get()) + ": " + r->get_meta(me->get()));
+		};
+	}
+
+	for(Map<String,int>::Element *E=type_count.front();E;E=E->next()) {
+
+		print_line(E->key()+" count: "+itos(E->get()));
+	}
+
+};
+
+
 void _OS::print_all_resources(const String& p_to_file ) {
 
 	OS::get_singleton()->print_all_resources(p_to_file);
@@ -438,6 +651,41 @@ float _OS::get_frames_per_second() const {
 	return OS::get_singleton()->get_frames_per_second();
 }
 
+Error _OS::native_video_play(String p_path, float p_volume, String p_audio_track, String p_subtitle_track) {
+
+	return OS::get_singleton()->native_video_play(p_path, p_volume, p_audio_track, p_subtitle_track);
+};
+
+bool _OS::native_video_is_playing() {
+
+	return OS::get_singleton()->native_video_is_playing();
+};
+
+void _OS::native_video_pause() {
+
+	OS::get_singleton()->native_video_pause();
+};
+
+void _OS::native_video_stop() {
+
+	OS::get_singleton()->native_video_stop();
+};
+
+bool _OS::is_debug_build() const {
+
+#ifdef DEBUG_ENABLED
+	return true;
+#else
+	return false;
+#endif
+
+}
+
+String _OS::get_system_dir(SystemDir p_dir) const {
+
+	return OS::get_singleton()->get_system_dir(OS::SystemDir(p_dir));
+}
+
 String _OS::get_custom_level() const {
 
 	return OS::get_singleton()->get_custom_level();
@@ -446,7 +694,7 @@ _OS *_OS::singleton=NULL;
 
 void _OS::_bind_methods() {
 
-	ObjectTypeDB::bind_method(_MD("get_mouse_pos"),&_OS::get_mouse_pos);
+	//ObjectTypeDB::bind_method(_MD("get_mouse_pos"),&_OS::get_mouse_pos);
 	//ObjectTypeDB::bind_method(_MD("is_mouse_grab_enabled"),&_OS::is_mouse_grab_enabled);
 
 	ObjectTypeDB::bind_method(_MD("set_clipboard","clipboard"),&_OS::set_clipboard);
@@ -458,12 +706,37 @@ void _OS::_bind_methods() {
 	ObjectTypeDB::bind_method(_MD("is_video_mode_resizable","screen"),&_OS::is_video_mode_resizable,DEFVAL(0));
 	ObjectTypeDB::bind_method(_MD("get_fullscreen_mode_list","screen"),&_OS::get_fullscreen_mode_list,DEFVAL(0));
 
+
+	ObjectTypeDB::bind_method(_MD("get_screen_count"),&_OS::get_screen_count);
+	ObjectTypeDB::bind_method(_MD("get_current_screen"),&_OS::get_current_screen);
+	ObjectTypeDB::bind_method(_MD("set_current_screen"),&_OS::set_current_screen);
+	ObjectTypeDB::bind_method(_MD("get_screen_position"),&_OS::get_screen_position,DEFVAL(0));
+	ObjectTypeDB::bind_method(_MD("get_screen_size"),&_OS::get_screen_size,DEFVAL(0));
+	ObjectTypeDB::bind_method(_MD("get_window_position"),&_OS::get_window_position);
+	ObjectTypeDB::bind_method(_MD("set_window_position"),&_OS::set_window_position);
+	ObjectTypeDB::bind_method(_MD("get_window_size"),&_OS::get_window_size);
+	ObjectTypeDB::bind_method(_MD("set_window_size"),&_OS::set_window_size);
+	ObjectTypeDB::bind_method(_MD("set_window_fullscreen","enabled"),&_OS::set_window_fullscreen);
+	ObjectTypeDB::bind_method(_MD("is_window_fullscreen"),&_OS::is_window_fullscreen);
+	ObjectTypeDB::bind_method(_MD("set_window_resizable","enabled"),&_OS::set_window_resizable);
+	ObjectTypeDB::bind_method(_MD("is_window_resizable"),&_OS::is_window_resizable);
+	ObjectTypeDB::bind_method(_MD("set_window_minimized", "enabled"),&_OS::set_window_minimized);
+	ObjectTypeDB::bind_method(_MD("is_window_minimized"),&_OS::is_window_minimized);
+	ObjectTypeDB::bind_method(_MD("set_window_maximized", "enabled"),&_OS::set_window_maximized);
+	ObjectTypeDB::bind_method(_MD("is_window_maximized"),&_OS::is_window_maximized);
+
+
 	ObjectTypeDB::bind_method(_MD("set_iterations_per_second","iterations_per_second"),&_OS::set_iterations_per_second);
 	ObjectTypeDB::bind_method(_MD("get_iterations_per_second"),&_OS::get_iterations_per_second);
+	ObjectTypeDB::bind_method(_MD("set_target_fps","target_fps"),&_OS::set_target_fps);
+	ObjectTypeDB::bind_method(_MD("get_target_fps"),&_OS::get_target_fps);
+
+	ObjectTypeDB::bind_method(_MD("set_time_scale","time_scale"),&_OS::set_time_scale);
+	ObjectTypeDB::bind_method(_MD("get_time_scale"),&_OS::get_time_scale);
 
 	ObjectTypeDB::bind_method(_MD("has_touchscreen_ui_hint"),&_OS::has_touchscreen_ui_hint);
 
-
+	ObjectTypeDB::bind_method(_MD("set_window_title","title"),&_OS::set_window_title);
 
 	ObjectTypeDB::bind_method(_MD("set_low_processor_usage_mode","enable"),&_OS::set_low_processor_usage_mode);
 	ObjectTypeDB::bind_method(_MD("is_in_low_processor_usage_mode"),&_OS::is_in_low_processor_usage_mode);
@@ -471,9 +744,10 @@ void _OS::_bind_methods() {
 	ObjectTypeDB::bind_method(_MD("get_processor_count"),&_OS::get_processor_count);
 
 	ObjectTypeDB::bind_method(_MD("get_executable_path"),&_OS::get_executable_path);
-	ObjectTypeDB::bind_method(_MD("execute","path","arguments","blocking"),&_OS::execute);
+	ObjectTypeDB::bind_method(_MD("execute","path","arguments","blocking","output"),&_OS::execute,DEFVAL(Array()));
 	ObjectTypeDB::bind_method(_MD("kill","pid"),&_OS::kill);
 	ObjectTypeDB::bind_method(_MD("shell_open","uri"),&_OS::shell_open);
+	ObjectTypeDB::bind_method(_MD("get_process_ID"),&_OS::get_process_ID);
 
 	ObjectTypeDB::bind_method(_MD("get_environment","environment"),&_OS::get_environment);
 	ObjectTypeDB::bind_method(_MD("has_environment","environment"),&_OS::has_environment);
@@ -500,7 +774,11 @@ void _OS::_bind_methods() {
 	ObjectTypeDB::bind_method(_MD("get_frames_drawn"),&_OS::get_frames_drawn);
 	ObjectTypeDB::bind_method(_MD("is_stdout_verbose"),&_OS::is_stdout_verbose);
 
-	ObjectTypeDB::bind_method(_MD("get_mouse_button_state"),&_OS::get_mouse_button_state);
+	ObjectTypeDB::bind_method(_MD("can_use_threads"),&_OS::can_use_threads);
+
+	ObjectTypeDB::bind_method(_MD("is_debug_build"),&_OS::is_debug_build);
+
+	//ObjectTypeDB::bind_method(_MD("get_mouse_button_state"),&_OS::get_mouse_button_state);
 
 	ObjectTypeDB::bind_method(_MD("dump_memory_to_file","file"),&_OS::dump_memory_to_file);
 	ObjectTypeDB::bind_method(_MD("dump_resources_to_file","file"),&_OS::dump_resources_to_file);
@@ -512,9 +790,25 @@ void _OS::_bind_methods() {
 	ObjectTypeDB::bind_method(_MD("get_dynamic_memory_usage"),&_OS::get_dynamic_memory_usage);
 
 	ObjectTypeDB::bind_method(_MD("get_data_dir"),&_OS::get_data_dir);
+	ObjectTypeDB::bind_method(_MD("get_system_dir","dir"),&_OS::get_system_dir);
 	ObjectTypeDB::bind_method(_MD("get_unique_ID"),&_OS::get_unique_ID);
 
+	ObjectTypeDB::bind_method(_MD("is_ok_left_and_cancel_right"),&_OS::is_ok_left_and_cancel_right);
+
 	ObjectTypeDB::bind_method(_MD("get_frames_per_second"),&_OS::get_frames_per_second);
+
+	ObjectTypeDB::bind_method(_MD("print_all_textures_by_size"),&_OS::print_all_textures_by_size);
+	ObjectTypeDB::bind_method(_MD("print_resources_by_type"),&_OS::print_resources_by_type);
+
+	ObjectTypeDB::bind_method(_MD("native_video_play"),&_OS::native_video_play);
+	ObjectTypeDB::bind_method(_MD("native_video_is_playing"),&_OS::native_video_is_playing);
+	ObjectTypeDB::bind_method(_MD("native_video_stop"),&_OS::native_video_stop);
+	ObjectTypeDB::bind_method(_MD("native_video_pause"),&_OS::native_video_pause);
+
+
+	ObjectTypeDB::bind_method(_MD("set_use_file_access_save_and_swap","enabled"),&_OS::set_use_file_access_save_and_swap);
+
+
 
 	BIND_CONSTANT( DAY_SUNDAY );
 	BIND_CONSTANT( DAY_MONDAY );
@@ -537,6 +831,14 @@ void _OS::_bind_methods() {
 	BIND_CONSTANT( MONTH_NOVEMBER );
 	BIND_CONSTANT( MONTH_DECEMBER );
 
+	BIND_CONSTANT( SYSTEM_DIR_DESKTOP);
+	BIND_CONSTANT( SYSTEM_DIR_DCIM );
+	BIND_CONSTANT( SYSTEM_DIR_DOCUMENTS );
+	BIND_CONSTANT( SYSTEM_DIR_DOWNLOADS );
+	BIND_CONSTANT( SYSTEM_DIR_MOVIES );
+	BIND_CONSTANT( SYSTEM_DIR_MUSIC );
+	BIND_CONSTANT( SYSTEM_DIR_PICTURES );
+	BIND_CONSTANT( SYSTEM_DIR_RINGTONES );
 
 }
 
@@ -632,6 +934,12 @@ Variant _Geometry::segment_intersects_triangle( const Vector3& p_from, const Vec
 		return Variant();
 
 }
+
+bool _Geometry::point_is_inside_triangle(const Vector2& s, const Vector2& a, const Vector2& b, const Vector2& c) const {
+
+	return Geometry::is_point_in_triangle(s,a,b,c);
+}
+
 DVector<Vector3> _Geometry::segment_intersects_sphere( const Vector3& p_from, const Vector3& p_to, const Vector3& p_sphere_pos,real_t p_sphere_radius) {
 
 	DVector<Vector3> r;
@@ -675,6 +983,42 @@ Vector<int> _Geometry::triangulate_polygon(const Vector<Vector2>& p_polygon) {
 	return Geometry::triangulate_polygon(p_polygon);
 }
 
+Dictionary _Geometry::make_atlas(const Vector<Size2>& p_rects) {
+
+	Dictionary ret;
+
+	Vector<Size2i> rects;
+	for (int i=0; i<p_rects.size(); i++) {
+
+		rects.push_back(p_rects[i]);
+	};
+
+	Vector<Point2i> result;
+	Size2i size;
+
+	Geometry::make_atlas(rects, result, size);
+
+	Size2 r_size = size;
+	Vector<Point2> r_result;
+	for (int i=0; i<result.size(); i++) {
+
+		r_result.push_back(result[i]);
+	};
+
+
+	ret["points"] = r_result;
+	ret["size"] = r_size;
+
+	return ret;
+};
+
+
+int _Geometry::get_uv84_normal_bit(const Vector3& p_vector) {
+
+	return Geometry::get_uv84_normal_bit(p_vector);
+}
+
+
 void _Geometry::_bind_methods() {
 
 
@@ -689,14 +1033,18 @@ void _Geometry::_bind_methods() {
 
 	ObjectTypeDB::bind_method(_MD("get_closest_point_to_segment","point","s1","s2"),&_Geometry::get_closest_point_to_segment);
 
+	ObjectTypeDB::bind_method(_MD("get_uv84_normal_bit","normal"),&_Geometry::get_uv84_normal_bit);
+
 	ObjectTypeDB::bind_method(_MD("ray_intersects_triangle","from","dir","a","b","c"),&_Geometry::ray_intersects_triangle);
 	ObjectTypeDB::bind_method(_MD("segment_intersects_triangle","from","to","a","b","c"),&_Geometry::segment_intersects_triangle);
 	ObjectTypeDB::bind_method(_MD("segment_intersects_sphere","from","to","spos","sradius"),&_Geometry::segment_intersects_sphere);
 	ObjectTypeDB::bind_method(_MD("segment_intersects_cylinder","from","to","height","radius"),&_Geometry::segment_intersects_cylinder);
 	ObjectTypeDB::bind_method(_MD("segment_intersects_convex","from","to","planes"),&_Geometry::segment_intersects_convex);
+	ObjectTypeDB::bind_method(_MD("point_is_inside_triangle","point","a","b","c"),&_Geometry::point_is_inside_triangle);
 
 	ObjectTypeDB::bind_method(_MD("triangulate_polygon","polygon"),&_Geometry::triangulate_polygon);
 
+	ObjectTypeDB::bind_method(_MD("make_atlas","sizes"),&_Geometry::make_atlas);
 }
 
 
@@ -706,6 +1054,44 @@ _Geometry::_Geometry() {
 
 
 ///////////////////////// FILE
+
+
+
+Error _File::open_encrypted(const String& p_path, int p_mode_flags,const Vector<uint8_t>& p_key) {
+
+	Error err = open(p_path,p_mode_flags);
+	if (err)
+		return err;
+
+	FileAccessEncrypted *fae = memnew( FileAccessEncrypted );
+	err = fae->open_and_parse(f,p_key,(p_mode_flags==WRITE)?FileAccessEncrypted::MODE_WRITE_AES256:FileAccessEncrypted::MODE_READ);
+	if (err) {
+		memdelete(fae);
+		close();
+		return err;
+	}
+	f=fae;
+	return OK;
+}
+
+Error _File::open_encrypted_pass(const String& p_path, int p_mode_flags,const String& p_pass) {
+
+	Error err = open(p_path,p_mode_flags);
+	if (err)
+		return err;
+
+	FileAccessEncrypted *fae = memnew( FileAccessEncrypted );
+	err = fae->open_and_parse_password(f,p_pass,(p_mode_flags==WRITE)?FileAccessEncrypted::MODE_WRITE_AES256:FileAccessEncrypted::MODE_READ);
+	if (err) {
+		memdelete(fae);
+		close();
+		return err;
+	}
+
+	f=fae;
+	return OK;
+
+}
 
 
 Error _File::open(const String& p_path, int p_mode_flags) {
@@ -838,6 +1224,7 @@ String _File::get_as_text() const {
 		text+=l+"\n";
 		l = get_line();
 	}
+	text+=l;
 
 	return text;
 
@@ -931,8 +1318,22 @@ void _File::store_string(const String& p_string){
 
 	f->store_string(p_string);
 }
-void _File::store_line(const String& p_string){
 
+void _File::store_pascal_string(const String& p_string) {
+
+	ERR_FAIL_COND(!f);
+
+	f->store_pascal_string(p_string);
+};
+
+String _File::get_pascal_string() {
+
+	ERR_FAIL_COND_V(!f, "");
+
+	return f->get_pascal_string();
+};
+
+void _File::store_line(const String& p_string){
 
 	ERR_FAIL_COND(!f);
 	f->store_line(p_string);
@@ -995,6 +1396,10 @@ Variant _File::get_var() const {
 
 void _File::_bind_methods() {
 
+
+	ObjectTypeDB::bind_method(_MD("open_encrypted","path","mode_flags","key"),&_File::open_encrypted);
+	ObjectTypeDB::bind_method(_MD("open_encrypted_with_pass","path","mode_flags","pass"),&_File::open_encrypted_pass);
+
 	ObjectTypeDB::bind_method(_MD("open","path","flags"),&_File::open);
 	ObjectTypeDB::bind_method(_MD("close"),&_File::close);
 	ObjectTypeDB::bind_method(_MD("is_open"),&_File::is_open);
@@ -1030,6 +1435,9 @@ void _File::_bind_methods() {
 	ObjectTypeDB::bind_method(_MD("store_line","line"),&_File::store_line);
 	ObjectTypeDB::bind_method(_MD("store_string","string"),&_File::store_string);
 	ObjectTypeDB::bind_method(_MD("store_var","value"),&_File::store_var);
+
+	ObjectTypeDB::bind_method(_MD("store_pascal_string","string"),&_File::store_pascal_string);
+	ObjectTypeDB::bind_method(_MD("get_pascal_string"),&_File::get_pascal_string);
 
 	ObjectTypeDB::bind_method(_MD("file_exists","path"),&_File::file_exists);
 
@@ -1131,6 +1539,10 @@ bool _Directory::file_exists(String p_file){
 	return d->file_exists(p_file);
 }
 
+bool _Directory::dir_exists(String p_dir) {
+	ERR_FAIL_COND_V(!d,false);
+	return d->dir_exists(p_dir);
+}
 
 int _Directory::get_space_left(){
 
@@ -1170,6 +1582,7 @@ void _Directory::_bind_methods() {
 	ObjectTypeDB::bind_method(_MD("make_dir:Error","name"),&_Directory::make_dir);
 	ObjectTypeDB::bind_method(_MD("make_dir_recursive:Error","name"),&_Directory::make_dir_recursive);
 	ObjectTypeDB::bind_method(_MD("file_exists","name"),&_Directory::file_exists);
+	ObjectTypeDB::bind_method(_MD("dir_exists","name"),&_Directory::dir_exists);
 //	ObjectTypeDB::bind_method(_MD("get_modified_time","file"),&_Directory::get_modified_time);
 	ObjectTypeDB::bind_method(_MD("get_space_left"),&_Directory::get_space_left);
 	ObjectTypeDB::bind_method(_MD("copy:Error","from","to"),&_Directory::copy);
@@ -1202,7 +1615,7 @@ String _Marshalls::variant_to_base64(const Variant& p_var) {
 	err = encode_variant(p_var,&w[0],len);
 	ERR_FAIL_COND_V( err != OK, "" );
 
-	int b64len = len / 3 * 4 + 4;
+	int b64len = len / 3 * 4 + 4 + 1;
 	DVector<uint8_t> b64buff;
 	b64buff.resize(b64len);
 	DVector<uint8_t>::Write w64 = b64buff.write();
@@ -1221,7 +1634,7 @@ Variant _Marshalls::base64_to_variant(const String& p_str) {
 	CharString cstr = p_str.ascii();
 
 	DVector<uint8_t> buf;
-	buf.resize(strlen / 4 * 3);
+	buf.resize(strlen / 4 * 3 + 1);
 	DVector<uint8_t>::Write w = buf.write();
 
 	int len = base64_decode((char*)(&w[0]), (char*)cstr.get_data(), strlen);

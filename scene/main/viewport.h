@@ -45,6 +45,7 @@ class RenderTargetTexture : public Texture {
 
 	OBJ_TYPE( RenderTargetTexture, Texture );
 
+	int flags;
 friend class Viewport;
 	Viewport *vp;
 
@@ -101,6 +102,7 @@ friend class RenderTargetTexture;
 	Matrix32 stretch_transform;
 
 	Rect2 rect;
+	Rect2 to_screen_rect;
 
 
 	bool size_override;
@@ -108,8 +110,21 @@ friend class RenderTargetTexture;
 	Size2 size_override_size;
 	Size2 size_override_margin;
 
+	Rect2 last_vp_rect;
 
 	bool transparent_bg;
+	bool render_target_vflip;
+	bool render_target_clear_on_new_frame;
+	bool render_target_filter;
+	bool render_target_gen_mipmaps;
+
+	bool physics_object_picking;
+	List<InputEvent> physics_picking_events;
+	ObjectID physics_object_capture;
+	ObjectID physics_object_over;
+	Vector2 physics_last_mousepos;
+	void _test_new_mouseover(ObjectID new_collider);
+	Map<ObjectID,uint64_t> physics_2d_mouseover;
 
 	void _update_rect();
 
@@ -119,6 +134,12 @@ friend class RenderTargetTexture;
 
 	Ref<World2D> world_2d;
 	Ref<World> world;
+	Ref<World> own_world;
+
+	StringName input_group;
+	StringName gui_input_group;
+	StringName unhandled_input_group;
+	StringName unhandled_key_input_group;
 
 	void _update_listener();
 	void _update_listener_2d();
@@ -138,9 +159,14 @@ friend class RenderTargetTexture;
 
 	void update_worlds();
 
+	_FORCE_INLINE_ Matrix32 _get_input_pre_xform() const;
 
-	void _vp_enter_scene();
-	void _vp_exit_scene();
+	void _vp_enter_tree();
+	void _vp_exit_tree();
+
+	void _vp_input(const InputEvent& p_ev);
+	void _vp_unhandled_input(const InputEvent& p_ev);
+	void _make_input_local(InputEvent& ev);
 
 friend class Camera;
 	void _camera_transform_changed_notify();
@@ -154,11 +180,9 @@ public:
 
 	Camera* get_camera() const;
 
-	void set_listener_transform(const Transform& p_xform);
 	void set_as_audio_listener(bool p_enable);
 	bool is_audio_listener() const;
 
-	void set_listener_2d_transform(const Matrix32& p_xform);
 	void set_as_audio_listener_2d(bool p_enable);
 	bool is_audio_listener_2d() const;
 
@@ -192,16 +216,46 @@ public:
 	void set_size_override_stretch(bool p_enable);
 	bool is_size_override_stretch_enabled() const;
 
-
-
 	void set_as_render_target(bool p_enable);
 	bool is_set_as_render_target() const;
+
+	void set_render_target_vflip(bool p_enable);
+	bool get_render_target_vflip() const;
+
+	void set_render_target_clear_on_new_frame(bool p_enable);
+	bool get_render_target_clear_on_new_frame() const;
+	void render_target_clear();
+
+	void set_render_target_filter(bool p_enable);
+	bool get_render_target_filter() const;
+
+	void set_render_target_gen_mipmaps(bool p_enable);
+	bool get_render_target_gen_mipmaps() const;
+
 	void set_render_target_update_mode(RenderTargetUpdateMode p_mode);
 	RenderTargetUpdateMode get_render_target_update_mode() const;
 	Ref<RenderTargetTexture> get_render_target_texture() const;
 
+
+	Vector2 get_camera_coords(const Vector2& p_viewport_coords) const;
+	Vector2 get_camera_rect_size() const;
+
 	void queue_screen_capture();
 	Image get_screen_capture() const;
+
+	void set_use_own_world(bool p_world);
+	bool is_using_own_world() const;
+
+	void input(const InputEvent& p_event);
+	void unhandled_input(const InputEvent& p_event);
+
+	void set_render_target_to_screen_rect(const Rect2& p_rect);
+	Rect2 get_render_target_to_screen_rect() const;
+
+	void warp_mouse(const Vector2& p_pos);
+
+	void set_physics_object_picking(bool p_enable);
+	bool get_physics_object_picking();
 
 	Viewport();	
 	~Viewport();

@@ -32,14 +32,13 @@
 #include "scene/io/resource_format_image.h"
 #include "scene/io/resource_format_wav.h"
 
-#include "scene/io/scene_format_script.h"
+//#include "scene/io/scene_format_script.h"
 #include "resources/default_theme/default_theme.h"
 #include "object_type_db.h"
 #include "scene/main/canvas_layer.h"
 #include "scene/main/viewport.h"
 #include "scene/gui/control.h"
 #include "scene/gui/texture_progress.h"
-#include "scene/gui/empty_control.h"
 #include "scene/gui/button.h"
 #include "scene/gui/button_array.h"
 #include "scene/gui/button_group.h"
@@ -54,6 +53,7 @@
 #include "scene/gui/color_picker.h"
 #include "scene/gui/texture_frame.h"
 #include "scene/gui/menu_button.h"
+#include "scene/gui/check_box.h"
 #include "scene/gui/check_button.h"
 #include "scene/gui/tab_container.h"
 #include "scene/gui/panel_container.h"
@@ -75,13 +75,20 @@
 #include "scene/gui/split_container.h"
 #include "scene/gui/video_player.h"
 #include "scene/gui/reference_frame.h"
+#include "scene/gui/graph_node.h"
+#include "scene/gui/graph_edit.h"
+#include "scene/gui/tool_button.h"
 #include "scene/resources/video_stream.h"
 #include "scene/2d/particles_2d.h"
 #include "scene/2d/path_2d.h"
+#include "scene/2d/light_2d.h"
+#include "scene/2d/light_occluder_2d.h"
 
 #include "scene/2d/canvas_item.h"
 #include "scene/2d/sprite.h"
 #include "scene/2d/animated_sprite.h"
+#include "scene/2d/polygon_2d.h"
+#include "scene/2d/back_buffer_copy.h"
 
 
 #include "scene/2d/visibility_notifier_2d.h"
@@ -99,6 +106,9 @@
 #include "scene/2d/sample_player_2d.h"
 #include "scene/2d/screen_button.h"
 #include "scene/2d/remote_transform_2d.h"
+#include "scene/2d/y_sort.h"
+#include "scene/2d/navigation2d.h"
+#include "scene/2d/canvas_modulate.h"
 
 #include "scene/2d/position_2d.h"
 #include "scene/2d/tile_map.h"
@@ -107,6 +117,7 @@
 
 #include "scene/animation/animation_player.h"
 #include "scene/animation/animation_tree_player.h"
+#include "scene/animation/tween.h"
 #include "scene/main/scene_main_loop.h"
 #include "scene/main/resource_preloader.h"
 #include "scene/resources/packed_scene.h"
@@ -117,7 +128,7 @@
 #include "scene/resources/scene_preloader.h"
 
 #include "scene/main/timer.h"
-#include "scene/io/scene_format_object.h"
+
 #include "scene/audio/stream_player.h"
 #include "scene/audio/event_player.h"
 #include "scene/audio/sound_room_params.h"
@@ -139,7 +150,8 @@
 
 #include "scene/resources/mesh_library.h"
 
-#include "scene/resources/image_path_finder.h"
+
+#include "scene/resources/polygon_path_finder.h"
 
 #include "scene/resources/sample.h"
 #include "scene/audio/sample_player.h"
@@ -147,6 +159,8 @@
 #include "scene/resources/material.h"
 #include "scene/resources/mesh.h"
 #include "scene/resources/room.h"
+
+#include "scene/resources/shader_graph.h"
 
 #include "scene/resources/world.h"
 #include "scene/resources/world_2d.h"
@@ -170,9 +184,8 @@
 
 #ifndef _3D_DISABLED
 #include "scene/3d/camera.h"
-#include "scene/3d/editable_shape.h"
+
 #include "scene/3d/interpolated_camera.h"
-#include "scene/3d/follow_camera.h"
 #include "scene/3d/position_3d.h"
 #include "scene/3d/test_cube.h"
 #include "scene/3d/mesh_instance.h"
@@ -182,18 +195,25 @@
 #include "scene/3d/portal.h"
 #include "scene/resources/environment.h"
 #include "scene/3d/physics_body.h"
-#include "scene/3d/car_body.h"
+
+#include "scene/3d/vehicle_body.h"
 #include "scene/3d/body_shape.h"
 #include "scene/3d/area.h"
 #include "scene/3d/physics_joint.h"
 #include "scene/3d/multimesh_instance.h"
+#include "scene/3d/baked_light_instance.h"
 #include "scene/3d/ray_cast.h"
+#include "scene/3d/immediate_geometry.h"
+#include "scene/3d/sprite_3d.h"
 #include "scene/3d/spatial_sample_player.h"
 #include "scene/3d/spatial_stream_player.h"
 #include "scene/3d/proximity_group.h"
+#include "scene/3d/navigation_mesh.h"
+#include "scene/3d/navigation.h"
+#include "scene/3d/collision_polygon.h"
 #endif
 
-#include "scene/scene_binds.h"
+
 
 static ResourceFormatLoaderImage *resource_loader_image=NULL;
 static ResourceFormatLoaderWAV *resource_loader_wav=NULL;
@@ -205,15 +225,6 @@ static ResourceFormatLoaderBitMap *resource_loader_bitmap=NULL;
 #endif
 static ResourceFormatLoaderTheme *resource_loader_theme=NULL;
 static ResourceFormatLoaderShader *resource_loader_shader=NULL;
-#ifdef OLD_SCENE_FORMAT_ENABLED
-static SceneFormatSaverObject *scene_saver_object=NULL;
-static SceneFormatLoaderObject *scene_loader_object=NULL;
-//static SceneFormatLoaderScript *scene_loader_script=NULL;
-#endif
-
-#ifdef OLD_SCENE_FORMAT_ENABLED
-SceneIO *scene_io=NULL;
-#endif
 
 //static SceneStringNames *string_names;
 
@@ -223,13 +234,7 @@ void register_scene_types() {
 
 	OS::get_singleton()->yield(); //may take time to init
 
-
-#ifdef OLD_SCENE_FORMAT_ENABLED
-	ObjectTypeDB::register_type<SceneIO>();
-	ObjectTypeDB::register_virtual_type<SceneInteractiveLoader>();
-	scene_io = memnew( SceneIO );
-	Globals::get_singleton()->add_singleton(Globals::Singleton("SceneIO",scene_io));
-#endif
+	Node::init_node_hrcr();
 
 	resource_loader_image = memnew( ResourceFormatLoaderImage );
 	ResourceLoader::add_resource_format_loader( resource_loader_image );
@@ -251,16 +256,6 @@ void register_scene_types() {
 
 	resource_loader_shader = memnew( ResourceFormatLoaderShader );
 	ResourceLoader::add_resource_format_loader( resource_loader_shader );
-#ifdef OLD_SCENE_FORMAT_ENABLED
-	scene_saver_object=memnew( SceneFormatSaverObject );
-	SceneSaver::add_scene_format_saver(scene_saver_object);
-	
-	scene_loader_object=memnew( SceneFormatLoaderObject );
-	SceneLoader::add_scene_format_loader(scene_loader_object);
-
-//	scene_loader_script=memnew( SceneFormatLoaderScript );
-//	SceneLoader::add_scene_format_loader(scene_loader_script);
-#endif
 
 	make_default_theme();
 
@@ -274,6 +269,7 @@ void register_scene_types() {
 	ObjectTypeDB::register_virtual_type<RenderTargetTexture>();
 	ObjectTypeDB::register_type<Timer>();
 	ObjectTypeDB::register_type<CanvasLayer>();
+	ObjectTypeDB::register_type<CanvasModulate>();
 	ObjectTypeDB::register_type<ResourcePreloader>();
 
 	/* REGISTER GUI */
@@ -283,7 +279,8 @@ void register_scene_types() {
 	OS::get_singleton()->yield(); //may take time to init
 
 	ObjectTypeDB::register_type<Control>();
-	ObjectTypeDB::register_type<EmptyControl>();
+//	ObjectTypeDB::register_type<EmptyControl>();
+	ObjectTypeDB::add_compatibility_type("EmptyControl","Control");
 	ObjectTypeDB::register_type<Button>();
 	ObjectTypeDB::register_type<Label>();
 	ObjectTypeDB::register_type<HScrollBar>();
@@ -294,7 +291,9 @@ void register_scene_types() {
 	ObjectTypeDB::register_type<Popup>();
 	ObjectTypeDB::register_type<PopupPanel>();
 	ObjectTypeDB::register_type<MenuButton>();
+    ObjectTypeDB::register_type<CheckBox>();
 	ObjectTypeDB::register_type<CheckButton>();
+	ObjectTypeDB::register_type<ToolButton>();
 	ObjectTypeDB::register_type<Panel>();
 	ObjectTypeDB::register_type<Range>();
 
@@ -318,6 +317,8 @@ void register_scene_types() {
 	ObjectTypeDB::register_virtual_type<SplitContainer>();
 	ObjectTypeDB::register_type<HSplitContainer>();
 	ObjectTypeDB::register_type<VSplitContainer>();
+	ObjectTypeDB::register_type<GraphNode>();
+	ObjectTypeDB::register_type<GraphEdit>();
 
 	OS::get_singleton()->yield(); //may take time to init
 
@@ -359,6 +360,7 @@ void register_scene_types() {
 	ObjectTypeDB::register_type<Spatial>();
 	ObjectTypeDB::register_type<Skeleton>();
 	ObjectTypeDB::register_type<AnimationPlayer>();
+	ObjectTypeDB::register_type<Tween>();
 
 	OS::get_singleton()->yield(); //may take time to init
 
@@ -366,10 +368,12 @@ void register_scene_types() {
 	ObjectTypeDB::register_type<BoneAttachment>();
 	ObjectTypeDB::register_virtual_type<VisualInstance>();
 	ObjectTypeDB::register_type<Camera>();
-	ObjectTypeDB::register_type<FollowCamera>();
 	ObjectTypeDB::register_type<InterpolatedCamera>();
 	ObjectTypeDB::register_type<TestCube>();
 	ObjectTypeDB::register_type<MeshInstance>();
+	ObjectTypeDB::register_type<ImmediateGeometry>();
+	ObjectTypeDB::register_type<Sprite3D>();
+	ObjectTypeDB::register_type<AnimatedSprite3D>();
 	ObjectTypeDB::register_virtual_type<Light>();
 	ObjectTypeDB::register_type<DirectionalLight>();
 	ObjectTypeDB::register_type<OmniLight>();
@@ -379,20 +383,25 @@ void register_scene_types() {
 	ObjectTypeDB::register_type<Particles>();
 	ObjectTypeDB::register_type<Position3D>();
 	ObjectTypeDB::register_type<Quad>();
+	ObjectTypeDB::register_type<NavigationMeshInstance>();
+	ObjectTypeDB::register_type<NavigationMesh>();
+	ObjectTypeDB::register_type<Navigation>();
 
 	OS::get_singleton()->yield(); //may take time to init
 
 	ObjectTypeDB::register_virtual_type<CollisionObject>();
 	ObjectTypeDB::register_type<StaticBody>();
 	ObjectTypeDB::register_type<RigidBody>();
-	ObjectTypeDB::register_type<CarBody>();
-	ObjectTypeDB::register_type<CarWheel>();
+	ObjectTypeDB::register_type<KinematicBody>();
+
+
+	ObjectTypeDB::register_type<VehicleBody>();
+	ObjectTypeDB::register_type<VehicleWheel>();
 	ObjectTypeDB::register_type<Area>();
 	ObjectTypeDB::register_type<ProximityGroup>();
 	ObjectTypeDB::register_type<CollisionShape>();
+	ObjectTypeDB::register_type<CollisionPolygon>();
 	ObjectTypeDB::register_type<RayCast>();
-	ObjectTypeDB::register_virtual_type<EditableShape>();
-	ObjectTypeDB::register_type<EditableSphere>();
 	ObjectTypeDB::register_type<MultiMeshInstance>();
 	ObjectTypeDB::register_type<Room>();
 	ObjectTypeDB::register_type<Curve3D>();
@@ -400,8 +409,16 @@ void register_scene_types() {
 	ObjectTypeDB::register_type<PathFollow>();
 	ObjectTypeDB::register_type<VisibilityNotifier>();
 	ObjectTypeDB::register_type<VisibilityEnabler>();
-
+	ObjectTypeDB::register_type<BakedLightInstance>();
+	ObjectTypeDB::register_type<BakedLightSampler>();
 	ObjectTypeDB::register_type<WorldEnvironment>();
+
+	ObjectTypeDB::register_virtual_type<Joint>();
+	ObjectTypeDB::register_type<PinJoint>();
+	ObjectTypeDB::register_type<HingeJoint>();
+	ObjectTypeDB::register_type<SliderJoint>();
+	ObjectTypeDB::register_type<ConeTwistJoint>();
+	ObjectTypeDB::register_type<Generic6DOFJoint>();
 
 	//scenariofx	
 
@@ -410,6 +427,7 @@ void register_scene_types() {
 	ObjectTypeDB::register_type<SpatialSamplePlayer>();
 	ObjectTypeDB::register_type<SpatialStreamPlayer>();
 	ObjectTypeDB::register_type<SoundRoomParams>();
+
 
 #endif
 	ObjectTypeDB::register_type<MeshLibrary>();
@@ -425,8 +443,10 @@ void register_scene_types() {
 	//ObjectTypeDB::register_type<BodyVolumeBox>();
 	//ObjectTypeDB::register_type<BodyVolumeCylinder>();
 	//ObjectTypeDB::register_type<BodyVolumeCapsule>();
-	//ObjectTypeDB::register_virtual_type<PhysicsJoint>();
 	//ObjectTypeDB::register_type<PhysicsJointPin>();
+
+
+
 
 	ObjectTypeDB::register_type<StreamPlayer>();
 	ObjectTypeDB::register_type<EventPlayer>();
@@ -440,11 +460,13 @@ void register_scene_types() {
 	//ObjectTypeDB::set_type_enabled("BodyVolumeCylinder",false);
 	//ObjectTypeDB::set_type_enabled("BodyVolumeConvexPolygon",false);
 
+	ObjectTypeDB::register_type<CanvasItemMaterial>();
 	ObjectTypeDB::register_virtual_type<CanvasItem>();
 	ObjectTypeDB::register_type<Node2D>();
 	ObjectTypeDB::register_type<Particles2D>();
 	ObjectTypeDB::register_type<ParticleAttractor2D>();
 	ObjectTypeDB::register_type<Sprite>();
+	ObjectTypeDB::register_type<ViewportSprite>();
 	ObjectTypeDB::register_type<SpriteFrames>();
 	ObjectTypeDB::register_type<AnimatedSprite>();
 	ObjectTypeDB::register_type<Position2D>();
@@ -452,12 +474,19 @@ void register_scene_types() {
 	ObjectTypeDB::register_virtual_type<PhysicsBody2D>();
 	ObjectTypeDB::register_type<StaticBody2D>();
 	ObjectTypeDB::register_type<RigidBody2D>();
+	ObjectTypeDB::register_type<KinematicBody2D>();
 	ObjectTypeDB::register_type<Area2D>();
 	ObjectTypeDB::register_type<CollisionShape2D>();
 	ObjectTypeDB::register_type<CollisionPolygon2D>();
 	ObjectTypeDB::register_type<RayCast2D>();
 	ObjectTypeDB::register_type<VisibilityNotifier2D>();
 	ObjectTypeDB::register_type<VisibilityEnabler2D>();
+	ObjectTypeDB::register_type<Polygon2D>();
+	ObjectTypeDB::register_type<Light2D>();
+	ObjectTypeDB::register_type<LightOccluder2D>();
+	ObjectTypeDB::register_type<OccluderPolygon2D>();
+	ObjectTypeDB::register_type<YSort>();
+	ObjectTypeDB::register_type<BackBufferCopy>();
 
 	ObjectTypeDB::set_type_enabled("CollisionShape2D",false);
 	ObjectTypeDB::set_type_enabled("CollisionPolygon2D",false);
@@ -482,15 +511,22 @@ void register_scene_types() {
 
 	/* REGISTER RESOURCES */
 
+	ObjectTypeDB::register_virtual_type<Shader>();
+	ObjectTypeDB::register_virtual_type<ShaderGraph>();
+	ObjectTypeDB::register_type<CanvasItemShader>();
+	ObjectTypeDB::register_type<CanvasItemShaderGraph>();
+
 #ifndef _3D_DISABLED
 	ObjectTypeDB::register_type<Mesh>();
 	ObjectTypeDB::register_virtual_type<Material>();
 	ObjectTypeDB::register_type<FixedMaterial>();
-	ObjectTypeDB::register_type<ParticleSystemMaterial>();
-	ObjectTypeDB::register_type<UnshadedMaterial>();
 	ObjectTypeDB::register_type<ShaderMaterial>();
 	ObjectTypeDB::register_type<RoomBounds>();
-	ObjectTypeDB::register_type<Shader>();
+	ObjectTypeDB::register_type<MaterialShaderGraph>();
+	ObjectTypeDB::register_type<MaterialShader>();
+	ObjectTypeDB::add_compatibility_type("Shader","MaterialShader");
+	ObjectTypeDB::add_compatibility_type("ParticleSystemMaterial","FixedMaterial");
+	ObjectTypeDB::add_compatibility_type("UnshadedMaterial","FixedMaterial");
 	ObjectTypeDB::register_type<MultiMesh>();
 	ObjectTypeDB::register_type<MeshLibrary>();
 
@@ -506,6 +542,7 @@ void register_scene_types() {
 
 	ObjectTypeDB::register_type<SurfaceTool>();
 	ObjectTypeDB::register_type<MeshDataTool>();
+	ObjectTypeDB::register_type<BakedLight>();
 
 	OS::get_singleton()->yield(); //may take time to init
 
@@ -525,7 +562,8 @@ void register_scene_types() {
 	ObjectTypeDB::register_type<StyleBoxFlat>();
 	ObjectTypeDB::register_type<StyleBoxImageMask>();
 	ObjectTypeDB::register_type<Theme>();
-	ObjectTypeDB::register_type<ImagePathFinder>();
+
+	ObjectTypeDB::register_type<PolygonPathFinder>();
 	ObjectTypeDB::register_type<BitMap>();
 
 	OS::get_singleton()->yield(); //may take time to init
@@ -550,16 +588,17 @@ void register_scene_types() {
 	ObjectTypeDB::register_type<ConcavePolygonShape2D>();
 	ObjectTypeDB::register_type<Curve2D>();
 	ObjectTypeDB::register_type<Path2D>();
+	ObjectTypeDB::register_type<PathFollow2D>();
+
+	ObjectTypeDB::register_type<Navigation2D>();
+	ObjectTypeDB::register_type<NavigationPolygon>();
+	ObjectTypeDB::register_type<NavigationPolygonInstance>();
 
 	OS::get_singleton()->yield(); //may take time to init
 
 	ObjectTypeDB::register_type<PackedScene>();
-#ifdef OLD_SCENE_FORMAT_ENABLED
-	ObjectTypeDB::register_type<ScenePreloader>();
-#endif
 
-
-	ObjectTypeDB::register_type<SceneMainLoop>();
+	ObjectTypeDB::register_type<SceneTree>();
 
 	OS::get_singleton()->yield(); //may take time to init
 
@@ -581,11 +620,5 @@ void unregister_scene_types() {
 
 	memdelete( resource_loader_theme );
 	memdelete( resource_loader_shader );
-#ifdef OLD_SCENE_FORMAT_ENABLED
-	memdelete( scene_saver_object );
-	memdelete( scene_loader_object );
-//	memdelete( scene_loader_script );
-	memdelete( scene_io );
-#endif
 	SceneStringNames::free();
 }

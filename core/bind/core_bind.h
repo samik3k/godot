@@ -21,7 +21,7 @@ public:
 
 	static _ResourceLoader *get_singleton() { return singleton; }
 	Ref<ResourceInteractiveLoader> load_interactive(const String& p_path,const String& p_type_hint="");
-	RES load(const String &p_path,const String& p_type_hint="");
+	RES load(const String &p_path,const String& p_type_hint="", bool p_no_cache = false);
 	DVector<String> get_recognized_extensions_for_type(const String& p_type);
 	void set_abort_on_missing_resources(bool p_abort);
 	StringArray get_dependencies(const String& p_path);
@@ -38,6 +38,16 @@ protected:
 	static void _bind_methods();
 	static _ResourceSaver *singleton;
 public:
+
+	enum SaverFlags {
+
+		FLAG_RELATIVE_PATHS=1,
+		FLAG_BUNDLE_RESOURCES=2,
+		FLAG_CHANGE_PATH=4,
+		FLAG_OMIT_EDITOR_PROPERTIES=8,
+		FLAG_SAVE_BIG_ENDIAN=16,
+		FLAG_COMPRESS=32,
+	};
 
 	static _ResourceSaver *get_singleton() { return singleton; }
 
@@ -98,16 +108,47 @@ public:
 	bool is_video_mode_resizable(int p_screen=0) const;
 	Array get_fullscreen_mode_list(int p_screen=0) const;
 
+
+	virtual int get_screen_count() const;
+	virtual int get_current_screen() const;
+	virtual void set_current_screen(int p_screen);
+	virtual Point2 get_screen_position(int p_screen=0) const;
+	virtual Size2 get_screen_size(int p_screen=0) const;
+	virtual Point2 get_window_position() const;
+	virtual void set_window_position(const Point2& p_position);
+	virtual Size2 get_window_size() const;
+	virtual void set_window_size(const Size2& p_size);
+	virtual void set_window_fullscreen(bool p_enabled);
+	virtual bool is_window_fullscreen() const;
+	virtual void set_window_resizable(bool p_enabled);
+	virtual bool is_window_resizable() const;
+	virtual void set_window_minimized(bool p_enabled);
+	virtual bool is_window_minimized() const;
+	virtual void set_window_maximized(bool p_enabled);
+	virtual bool is_window_maximized() const;
+
+
+	Error native_video_play(String p_path, float p_volume, String p_audio_track, String p_subtitle_track);
+	bool native_video_is_playing();
+	void native_video_pause();
+	void native_video_stop();
+
 	void set_iterations_per_second(int p_ips);
 	int get_iterations_per_second() const;
+
+	void set_target_fps(int p_fps);
+	float get_target_fps() const;
 
 	void set_low_processor_usage_mode(bool p_enabled);
 	bool is_in_low_processor_usage_mode() const;
 
 	String get_executable_path() const;
-	int execute(const String& p_path, const Vector<String> & p_arguments,bool p_blocking);
+	int execute(const String& p_path, const Vector<String> & p_arguments,bool p_blocking,Array p_output=Array());
+
 	Error kill(int p_pid);
 	Error shell_open(String p_uri);
+
+	int get_process_ID() const;
 
 	bool has_environment(const String& p_var) const;
 	String get_environment(const String& p_var) const;
@@ -128,8 +169,12 @@ public:
 
 	void print_resources_in_use(bool p_short=false);
 	void print_all_resources(const String& p_to_file);
+	void print_all_textures_by_size();
+	void print_resources_by_type(const Vector<String>& p_types);
 
 	bool has_touchscreen_ui_hint() const;
+
+	bool is_debug_build() const;
 
 	String get_unique_ID() const;
 
@@ -151,6 +196,7 @@ public:
 	};
 */
 
+	void set_use_file_access_save_and_swap(bool p_enable);
 
 	void set_icon(const Image& p_icon);
 	Dictionary get_date() const;
@@ -165,6 +211,7 @@ public:
 	void delay_msec(uint32_t p_msec) const;
 	uint32_t get_ticks_msec() const;
 
+	bool can_use_threads() const;
 
 	bool can_draw() const;
 
@@ -174,12 +221,34 @@ public:
 
 	int get_processor_count() const;
 
+	enum SystemDir {
+		SYSTEM_DIR_DESKTOP,
+		SYSTEM_DIR_DCIM,
+		SYSTEM_DIR_DOCUMENTS,
+		SYSTEM_DIR_DOWNLOADS,
+		SYSTEM_DIR_MOVIES,
+		SYSTEM_DIR_MUSIC,
+		SYSTEM_DIR_PICTURES,
+		SYSTEM_DIR_RINGTONES,
+	};
+
+	String get_system_dir(SystemDir p_dir) const;
+
+
 	String get_data_dir() const;
+
+	void set_time_scale(float p_scale);
+	float get_time_scale();
+
+	bool is_ok_left_and_cancel_right() const;
 
 	static _OS *get_singleton() { return singleton; }
 
 	_OS();
 };
+
+VARIANT_ENUM_CAST(_OS::SystemDir);
+
 
 class _Geometry : public Object {
 
@@ -201,12 +270,17 @@ public:
 	Vector3 get_closest_point_to_segment(const Vector3& p_point, const Vector3& p_a,const Vector3& p_b);
 	Variant ray_intersects_triangle( const Vector3& p_from, const Vector3& p_dir, const Vector3& p_v0,const Vector3& p_v1,const Vector3& p_v2);
 	Variant segment_intersects_triangle( const Vector3& p_from, const Vector3& p_to, const Vector3& p_v0,const Vector3& p_v1,const Vector3& p_v2);
+	bool point_is_inside_triangle(const Vector2& s, const Vector2& a, const Vector2& b, const Vector2& c) const;
+
 	DVector<Vector3> segment_intersects_sphere( const Vector3& p_from, const Vector3& p_to, const Vector3& p_sphere_pos,real_t p_sphere_radius);
 	DVector<Vector3> segment_intersects_cylinder( const Vector3& p_from, const Vector3& p_to, float p_height,float p_radius);
 	DVector<Vector3> segment_intersects_convex(const Vector3& p_from, const Vector3& p_to,const Vector<Plane>& p_planes);
 	real_t segment_intersects_circle(const Vector2& p_from, const Vector2& p_to, const Vector2& p_circle_pos, real_t p_circle_radius);
+	int get_uv84_normal_bit(const Vector3& p_vector);
 
 	Vector<int> triangulate_polygon(const Vector<Vector2>& p_polygon);
+
+	Dictionary make_atlas(const Vector<Size2>& p_rects);
 
 	_Geometry();
 };
@@ -230,6 +304,10 @@ public:
 		WRITE=2,
 		READ_WRITE=3,
 	};
+
+	Error open_encrypted(const String& p_path, int p_mode_flags,const Vector<uint8_t>& p_key);
+	Error open_encrypted_pass(const String& p_path, int p_mode_flags,const String& p_pass);
+
 
 	Error open(const String& p_path, int p_mode_flags); ///< open a file
 	void close(); ///< close a file
@@ -279,6 +357,9 @@ public:
 	void store_string(const String& p_string);
 	void store_line(const String& p_string);
 
+	virtual void store_pascal_string(const String& p_string);
+	virtual String get_pascal_string();
+
 	Vector<String> get_csv_line() const;
 
 
@@ -320,6 +401,7 @@ public:
 	Error make_dir_recursive(String p_dir);
 
 	bool file_exists(String p_file);
+	bool dir_exists(String p_dir);
 
 	int get_space_left();
 

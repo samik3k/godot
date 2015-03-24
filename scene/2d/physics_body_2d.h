@@ -38,11 +38,28 @@ class PhysicsBody2D : public CollisionObject2D {
 
 	OBJ_TYPE(PhysicsBody2D,CollisionObject2D);
 
+	uint32_t mask;
+	Vector2 one_way_collision_direction;
+	float one_way_collision_max_depth;
 protected:
 
 	void _notification(int p_what);
 	PhysicsBody2D(Physics2DServer::BodyMode p_mode);
+
+	static void _bind_methods();
 public:
+
+	void set_layer_mask(uint32_t p_mask);
+	uint32_t get_layer_mask() const;
+
+	void add_collision_exception_with(Node* p_node); //must be physicsbody
+	void remove_collision_exception_with(Node* p_node);
+
+	void set_one_way_collision_direction(const Vector2& p_dir);
+	Vector2 get_one_way_collision_direction() const;
+
+	void set_one_way_collision_max_depth(float p_dir);
+	float get_one_way_collision_max_depth() const;
 
 	PhysicsBody2D();
 
@@ -52,15 +69,8 @@ class StaticBody2D : public PhysicsBody2D {
 
 	OBJ_TYPE(StaticBody2D,PhysicsBody2D);
 
-	Matrix32 *pre_xform;
-	//RID query;
-	bool setting;
-	bool pending;
-	bool simulating_motion;
 	Vector2 constant_linear_velocity;
 	real_t constant_angular_velocity;
-	void _update_xform();
-	void _state_notify(Object *p_object);
 
 	real_t bounce;
 	real_t friction;
@@ -68,7 +78,6 @@ class StaticBody2D : public PhysicsBody2D {
 
 protected:
 
-	void _notification(int p_what);
 	static void _bind_methods();
 
 public:
@@ -79,8 +88,6 @@ public:
 	void set_bounce(real_t p_bounce);
 	real_t get_bounce() const;
 
-	void set_simulate_motion(bool p_enable);
-	bool is_simulating_motion() const;
 
 	void set_constant_linear_velocity(const Vector2& p_vel);
 	void set_constant_angular_velocity(real_t p_vel);
@@ -102,8 +109,15 @@ public:
 		MODE_RIGID,
 		MODE_STATIC,
 		MODE_CHARACTER,
-		MODE_STATIC_ACTIVE,
+		MODE_KINEMATIC,
 	};
+
+	enum CCDMode {
+		CCD_MODE_DISABLED,
+		CCD_MODE_CAST_RAY,
+		CCD_MODE_CAST_SHAPE,
+	};
+
 private:
 
 	bool can_sleep;
@@ -113,16 +127,20 @@ private:
 	real_t bounce;
 	real_t mass;
 	real_t friction;
+	real_t gravity_scale;
+	real_t linear_damp;
+	real_t angular_damp;
 
 	Vector2 linear_velocity;
 	real_t angular_velocity;
-	bool active;
-	bool ccd;
+	bool sleeping;
 
 
 	int max_contacts_reported;
 
 	bool custom_integrator;
+
+	CCDMode ccd_mode;
 
 
 	struct ShapePair {
@@ -149,7 +167,7 @@ private:
 	};
 	struct BodyState {
 
-		int rc;
+		//int rc;
 		bool in_scene;
 		VSet<ShapePair> shapes;
 	};
@@ -163,8 +181,8 @@ private:
 
 
 	ContactMonitor *contact_monitor;
-	void _body_enter_scene(ObjectID p_id);
-	void _body_exit_scene(ObjectID p_id);
+	void _body_enter_tree(ObjectID p_id);
+	void _body_exit_tree(ObjectID p_id);
 
 
 	void _body_inout(int p_status, ObjectID p_instance, int p_body_shape,int p_local_shape);
@@ -173,7 +191,6 @@ private:
 
 protected:
 
-	void _notification(int p_what);
 	static void _bind_methods();
 public:
 
@@ -192,6 +209,15 @@ public:
 	void set_bounce(real_t p_bounce);
 	real_t get_bounce() const;
 
+	void set_gravity_scale(real_t p_gravity_scale);
+	real_t get_gravity_scale() const;
+
+	void set_linear_damp(real_t p_linear_damp);
+	real_t get_linear_damp() const;
+
+	void set_angular_damp(real_t p_angular_damp);
+	real_t get_angular_damp() const;
+
 	void set_linear_velocity(const Vector2& p_velocity);
 	Vector2 get_linear_velocity() const;
 
@@ -203,8 +229,8 @@ public:
 	void set_use_custom_integrator(bool p_enable);
 	bool is_using_custom_integrator();
 
-	void set_active(bool p_active);
-	bool is_active() const;
+	void set_sleeping(bool p_sleeping);
+	bool is_sleeping() const;
 
 	void set_can_sleep(bool p_active);
 	bool is_able_to_sleep() const;
@@ -215,13 +241,15 @@ public:
 	void set_max_contacts_reported(int p_amount);
 	int get_max_contacts_reported() const;
 
-	void set_use_continuous_collision_detection(bool p_enable);
-	bool is_using_continuous_collision_detection() const;
+	void set_continuous_collision_detection_mode(CCDMode p_mode);
+	CCDMode get_continuous_collision_detection_mode() const;
 
 	void apply_impulse(const Vector2& p_pos, const Vector2& p_impulse);
 
 	void set_applied_force(const Vector2& p_force);
 	Vector2 get_applied_force() const;
+
+	Array get_colliding_bodies() const; //function for script
 
 	RigidBody2D();
 	~RigidBody2D();
@@ -229,4 +257,67 @@ public:
 };
 
 VARIANT_ENUM_CAST(RigidBody2D::Mode);
+VARIANT_ENUM_CAST(RigidBody2D::CCDMode);
+
+
+
+class KinematicBody2D : public PhysicsBody2D {
+
+	OBJ_TYPE(KinematicBody2D,PhysicsBody2D);
+
+	float margin;
+	bool collide_static;
+	bool collide_rigid;
+	bool collide_kinematic;
+	bool collide_character;
+
+	bool colliding;
+	Vector2 collision;
+	Vector2 normal;
+	Vector2 collider_vel;
+	ObjectID collider;
+	int collider_shape;
+	Variant collider_metadata;
+
+	Variant _get_collider() const;
+
+	_FORCE_INLINE_ bool _ignores_mode(Physics2DServer::BodyMode) const;
+protected:
+
+	static void _bind_methods();
+public:
+
+	Vector2 move(const Vector2& p_motion);
+	Vector2 move_to(const Vector2& p_position);
+
+	bool can_move_to(const Vector2& p_position,bool p_discrete=false);
+	bool is_colliding() const;
+	Vector2 get_collision_pos() const;
+	Vector2 get_collision_normal() const;
+	Vector2 get_collider_velocity() const;
+	ObjectID get_collider() const;
+	int get_collider_shape() const;
+	Variant get_collider_metadata() const;
+
+	void set_collide_with_static_bodies(bool p_enable);
+	bool can_collide_with_static_bodies() const;
+
+	void set_collide_with_rigid_bodies(bool p_enable);
+	bool can_collide_with_rigid_bodies() const;
+
+	void set_collide_with_kinematic_bodies(bool p_enable);
+	bool can_collide_with_kinematic_bodies() const;
+
+	void set_collide_with_character_bodies(bool p_enable);
+	bool can_collide_with_character_bodies() const;
+
+	void set_collision_margin(float p_margin);
+	float get_collision_margin() const;
+
+	KinematicBody2D();
+	~KinematicBody2D();
+
+};
+
+
 #endif // PHYSICS_BODY_2D_H

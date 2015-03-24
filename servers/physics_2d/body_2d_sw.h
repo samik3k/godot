@@ -47,6 +47,10 @@ class Body2DSW : public CollisionObject2DSW {
 	Vector2 linear_velocity;
 	real_t angular_velocity;
 
+	real_t linear_damp;
+	real_t angular_damp;
+	real_t gravity_scale;
+
 	real_t mass;
 	real_t bounce;
 	real_t friction;
@@ -55,25 +59,31 @@ class Body2DSW : public CollisionObject2DSW {
 	real_t _inv_inertia;
 
 	Vector2 gravity;
-	real_t density;
+	real_t area_linear_damp;
+	real_t area_angular_damp;
 
 	real_t still_time;
 
 	Vector2 applied_force;
 	real_t applied_torque;
 
+	Vector2 one_way_collision_direction;
+	float one_way_collision_max_depth;
+
+
 	SelfList<Body2DSW> active_list;
 	SelfList<Body2DSW> inertia_update_list;
 	SelfList<Body2DSW> direct_state_query_list;
 
 	VSet<RID> exceptions;
+	Physics2DServer::CCDMode continuous_cd_mode;
 	bool omit_force_integration;
 	bool active;
-	bool simulated_motion;
-	bool continuous_cd;
 	bool can_sleep;
+	bool first_time_kinematic;
 	void _update_inertia();
 	virtual void _shapes_changed();
+	Matrix32 new_transform;
 
 
 	Map<Constraint2DSW*,int> constraint_map;
@@ -133,7 +143,8 @@ public:
 	_FORCE_INLINE_ void add_area(Area2DSW *p_area) { areas.insert(AreaCMP(p_area)); }
 	_FORCE_INLINE_ void remove_area(Area2DSW *p_area) { areas.erase(AreaCMP(p_area)); }
 
-	_FORCE_INLINE_ void set_max_contacts_reported(int p_size) { contacts.resize(p_size); contact_count=0; }
+	_FORCE_INLINE_ void set_max_contacts_reported(int p_size) { contacts.resize(p_size); contact_count=0; if (mode==Physics2DServer::BODY_MODE_KINEMATIC && p_size) set_active(true);}
+
 	_FORCE_INLINE_ int get_max_contacts_reported() const { return contacts.size(); }
 
 	_FORCE_INLINE_ bool can_report_contacts() const { return !contacts.empty(); }
@@ -173,6 +184,7 @@ public:
 	_FORCE_INLINE_ void set_biased_angular_velocity(real_t p_velocity) { biased_angular_velocity=p_velocity; }
 	_FORCE_INLINE_ real_t get_biased_angular_velocity() const { return biased_angular_velocity; }
 
+
 	_FORCE_INLINE_ void apply_impulse(const Vector2& p_pos, const Vector2& p_j) {
 
 		linear_velocity += p_j * _inv_mass;
@@ -203,8 +215,15 @@ public:
 	void set_applied_torque(real_t p_torque) { applied_torque=p_torque; }
 	real_t get_applied_torque() const { return applied_torque; }
 
-	_FORCE_INLINE_ void set_continuous_collision_detection(bool p_enable) { continuous_cd=p_enable; }
-	_FORCE_INLINE_ bool is_continuous_collision_detection_enabled() const { return continuous_cd; }
+
+	_FORCE_INLINE_ void set_continuous_collision_detection_mode(Physics2DServer::CCDMode p_mode) { continuous_cd_mode=p_mode; }
+	_FORCE_INLINE_ Physics2DServer::CCDMode get_continuous_collision_detection_mode() const { return continuous_cd_mode; }
+
+	void set_one_way_collision_direction(const Vector2& p_dir) { one_way_collision_direction=p_dir; }
+	Vector2 get_one_way_collision_direction() const { return one_way_collision_direction; }
+
+	void set_one_way_collision_max_depth(float p_depth) { one_way_collision_max_depth=p_depth; }
+	float get_one_way_collision_max_depth() const { return one_way_collision_max_depth; }
 
 	void set_space(Space2DSW *p_space);
 
@@ -214,12 +233,24 @@ public:
 	_FORCE_INLINE_ real_t get_inv_inertia() const { return _inv_inertia; }
 	_FORCE_INLINE_ real_t get_friction() const { return friction; }
 	_FORCE_INLINE_ Vector2 get_gravity() const { return gravity; }
-	_FORCE_INLINE_ real_t get_density() const { return density; }
+	_FORCE_INLINE_ real_t get_bounce() const { return bounce; }
+	_FORCE_INLINE_ real_t get_linear_damp() const { return linear_damp; }
+	_FORCE_INLINE_ real_t get_angular_damp() const { return angular_damp; }
+
 
 	void integrate_forces(real_t p_step);
 	void integrate_velocities(real_t p_step);
 
-	void simulate_motion(const Matrix32& p_xform,real_t p_step);
+	_FORCE_INLINE_ Vector2 get_motion() const {
+
+		if (mode>Physics2DServer::BODY_MODE_KINEMATIC) {
+			return new_transform.get_origin() - get_transform().get_origin();
+		} else if (mode==Physics2DServer::BODY_MODE_KINEMATIC) {
+			return  get_transform().get_origin() -new_transform.get_origin(); //kinematic simulates forward
+		}
+		return Vector2();
+	}
+
 	void call_queries();
 	void wakeup_neighbours();
 
@@ -291,7 +322,8 @@ public:
 	real_t step;
 
 	virtual Vector2 get_total_gravity() const {  return body->get_gravity();  } // get gravity vector working on this body space/area
-	virtual float get_total_density() const {  return body->get_density();  } // get density of this body space/area
+	virtual float get_total_angular_damp() const {  return body->get_angular_damp();  } // get density of this body space/area
+	virtual float get_total_linear_damp() const {  return body->get_linear_damp();  } // get density of this body space/area
 
 	virtual float get_inverse_mass() const {  return body->get_inv_mass();  } // get the mass
 	virtual real_t get_inverse_inertia() const { return body->get_inv_inertia();   } // get density of this body space
@@ -321,6 +353,8 @@ public:
 	virtual Vector2 get_contact_collider_pos(int p_contact_idx) const {  ERR_FAIL_INDEX_V(p_contact_idx,body->contact_count,Vector2());   return body->contacts[p_contact_idx].collider_pos;  }
 	virtual ObjectID get_contact_collider_id(int p_contact_idx) const {  ERR_FAIL_INDEX_V(p_contact_idx,body->contact_count,0);   return body->contacts[p_contact_idx].collider_instance_id;   }
 	virtual int get_contact_collider_shape(int p_contact_idx) const {  ERR_FAIL_INDEX_V(p_contact_idx,body->contact_count,0); return body->contacts[p_contact_idx].collider_shape;  }
+	virtual Variant get_contact_collider_shape_metadata(int p_contact_idx) const {  ERR_FAIL_INDEX_V(p_contact_idx,body->contact_count,Variant()); return body->get_shape_metadata(body->contacts[p_contact_idx].collider_shape);  }
+
 	virtual Vector2 get_contact_collider_velocity_at_pos(int p_contact_idx) const {  ERR_FAIL_INDEX_V(p_contact_idx,body->contact_count,Vector2()); return body->contacts[p_contact_idx].collider_velocity_at_pos;  }
 
 	virtual Physics2DDirectSpaceState* get_space_state();

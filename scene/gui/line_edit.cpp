@@ -79,6 +79,9 @@ void LineEdit::_input_event(InputEvent p_event) {
 				}
 				selection.creating=false;
 				selection.doubleclick=false;
+
+                // notify to show soft keyboard
+                notification(NOTIFICATION_FOCUS_ENTER);
 			}
 			
 			update();				
@@ -208,6 +211,8 @@ void LineEdit::_input_event(InputEvent p_event) {
 					case KEY_RETURN: {
 
 						emit_signal( "text_entered",text );
+                        // notify to hide soft keyboard
+						   notification(NOTIFICATION_FOCUS_EXIT);
 						return;
 					} break;
 
@@ -318,9 +323,12 @@ bool LineEdit::can_drop_data(const Point2& p_point,const Variant& p_data) const{
 void LineEdit::drop_data(const Point2& p_point,const Variant& p_data){
 
 	if (p_data.get_type()==Variant::STRING) {
-
 		set_cursor_at_pixel_pos(p_point.x);
+		int selected = selection.end - selection.begin;
+		text.erase(selection.begin, selected);
 		append_at_cursor(p_data);
+		selection.begin = cursor_pos-selected;
+		selection.end = cursor_pos;
 	}
 }
 
@@ -564,7 +572,7 @@ void LineEdit::set_cursor_pos(int p_pos) {
 //	set_window_pos(cursor_pos-get_window_lengt//h());
 //	}
 	
-	if (!is_inside_scene()) {
+	if (!is_inside_tree()) {
 		
 		window_pos=cursor_pos;
 		return;
@@ -669,6 +677,7 @@ void LineEdit::selection_delete() {
 		
 		undo_text = text;
 		text.erase(selection.begin,selection.end-selection.begin);
+		cursor_pos-=CLAMP( cursor_pos-selection.begin, 0, selection.end-selection.begin);
 		
 		if (cursor_pos>=text.length()) {
 			
@@ -748,6 +757,11 @@ bool LineEdit::is_secret() const {
 
 void LineEdit::select(int p_from, int p_to) {
 
+	if (p_from==0 && p_to==0) {
+		selection_clear();
+		return;
+	}
+
 	int len = text.length();
 	if (p_from<0)
 		p_from=0;
@@ -786,7 +800,7 @@ void LineEdit::_bind_methods() {
 	ObjectTypeDB::bind_method(_MD("is_editable"),&LineEdit::is_editable);	
 	ObjectTypeDB::bind_method(_MD("set_secret","enabled"),&LineEdit::set_secret);
 	ObjectTypeDB::bind_method(_MD("is_secret"),&LineEdit::is_secret);	
-	ObjectTypeDB::bind_method(_MD("select","from","to"),&LineEdit::is_secret,DEFVAL(0),DEFVAL(-1));
+	ObjectTypeDB::bind_method(_MD("select","from","to"),&LineEdit::select,DEFVAL(0),DEFVAL(-1));
 
 	ADD_SIGNAL( MethodInfo("text_changed", PropertyInfo( Variant::STRING, "text" )) );
 	ADD_SIGNAL( MethodInfo("text_entered", PropertyInfo( Variant::STRING, "text" )) );

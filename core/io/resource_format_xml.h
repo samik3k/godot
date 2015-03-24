@@ -50,6 +50,10 @@ class ResourceInteractiveLoaderXML : public ResourceInteractiveLoader {
 
 	_FORCE_INLINE_ Error _parse_array_element(Vector<char> &buff,bool p_number_only,FileAccess *f,bool *end);
 
+
+
+	List<StringName> ext_resources;
+
 	int resources_total;
 	int resource_current;
 	String resource_type;
@@ -64,7 +68,7 @@ friend class ResourceFormatLoaderXML;
 	List<RES> resource_cache;
 	Tag* parse_tag(bool* r_exit=NULL,bool p_printerr=true);
 	Error close_tag(const String& p_name);
-	void unquote(String& p_str);
+	_FORCE_INLINE_ void unquote(String& p_str);
 	Error goto_end_of_tag();
 	Error parse_property_data(String &r_data);
 	Error parse_property(Variant& r_v, String &r_name);
@@ -113,7 +117,7 @@ class ResourceFormatSaverXMLInstance  {
 
 
 
-	bool no_extension;
+	bool takeover_paths;
 	bool relative_paths;
 	bool bundle_resources;
 	bool skip_editor;

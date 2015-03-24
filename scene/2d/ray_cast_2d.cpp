@@ -28,11 +28,12 @@
 /*************************************************************************/
 #include "ray_cast_2d.h"
 #include "servers/physics_2d_server.h"
+#include "collision_object_2d.h"
 
 void RayCast2D::set_cast_to(const Vector2& p_point) {
 
 	cast_to=p_point;
-	if (is_inside_scene() && get_scene()->is_editor_hint())
+	if (is_inside_tree() && get_tree()->is_editor_hint())
 		update();
 
 }
@@ -40,6 +41,16 @@ void RayCast2D::set_cast_to(const Vector2& p_point) {
 Vector2 RayCast2D::get_cast_to() const{
 
 	return cast_to;
+}
+
+void RayCast2D::set_layer_mask(uint32_t p_mask) {
+
+	layer_mask=p_mask;
+}
+
+uint32_t RayCast2D::get_layer_mask() const {
+
+	return layer_mask;
 }
 
 bool RayCast2D::is_colliding() const{
@@ -71,7 +82,7 @@ Vector2 RayCast2D::get_collision_normal() const{
 void RayCast2D::set_enabled(bool p_enabled) {
 
 	enabled=p_enabled;
-	if (is_inside_scene() && !get_scene()->is_editor_hint())
+	if (is_inside_tree() && !get_tree()->is_editor_hint())
 		set_fixed_process(p_enabled);
 	if (!p_enabled)
 		collided=false;
@@ -90,15 +101,15 @@ void RayCast2D::_notification(int p_what) {
 
 	switch(p_what) {
 
-		case NOTIFICATION_ENTER_SCENE: {
+		case NOTIFICATION_ENTER_TREE: {
 
-			if (enabled && !get_scene()->is_editor_hint())
+			if (enabled && !get_tree()->is_editor_hint())
 				set_fixed_process(true);
 			else
 				set_fixed_process(false);
 
 		} break;
-		case NOTIFICATION_EXIT_SCENE: {
+		case NOTIFICATION_EXIT_TREE: {
 
 			if (enabled)
 				set_fixed_process(false);
@@ -107,7 +118,7 @@ void RayCast2D::_notification(int p_what) {
 #ifdef TOOLS_ENABLED
 		case NOTIFICATION_DRAW: {
 
-			if (!get_scene()->is_editor_hint())
+			if (!get_tree()->is_editor_hint())
 				break;
 			Matrix32 xf;
 			xf.rotate(cast_to.atan2());
@@ -151,7 +162,7 @@ void RayCast2D::_notification(int p_what) {
 
 			Physics2DDirectSpaceState::RayResult rr;
 
-			if (dss->intersect_ray(gt.get_origin(),gt.xform(to),rr)) {
+			if (dss->intersect_ray(gt.get_origin(),gt.xform(to),rr,exclude,layer_mask)) {
 
 				collided=true;
 				against=rr.collider_id;
@@ -167,6 +178,41 @@ void RayCast2D::_notification(int p_what) {
 		} break;
 	}
 }
+
+void RayCast2D::add_exception_rid(const RID& p_rid) {
+
+	exclude.insert(p_rid);
+}
+
+void RayCast2D::add_exception(const Object* p_object){
+
+	ERR_FAIL_NULL(p_object);
+	CollisionObject2D *co=((Object*)p_object)->cast_to<CollisionObject2D>();
+	if (!co)
+		return;
+	add_exception_rid(co->get_rid());
+}
+
+void RayCast2D::remove_exception_rid(const RID& p_rid) {
+
+	exclude.erase(p_rid);
+}
+
+void RayCast2D::remove_exception(const Object* p_object){
+
+	ERR_FAIL_NULL(p_object);
+	CollisionObject2D *co=((Object*)p_object)->cast_to<CollisionObject2D>();
+	if (!co)
+		return;
+	remove_exception_rid(co->get_rid());
+}
+
+
+void RayCast2D::clear_exceptions(){
+
+	exclude.clear();
+}
+
 
 void RayCast2D::_bind_methods() {
 
@@ -184,8 +230,20 @@ void RayCast2D::_bind_methods() {
 	ObjectTypeDB::bind_method(_MD("get_collision_point"),&RayCast2D::get_collision_point);
 	ObjectTypeDB::bind_method(_MD("get_collision_normal"),&RayCast2D::get_collision_normal);
 
+	ObjectTypeDB::bind_method(_MD("add_exception_rid","rid"),&RayCast2D::add_exception_rid);
+	ObjectTypeDB::bind_method(_MD("add_exception","node"),&RayCast2D::add_exception);
+
+	ObjectTypeDB::bind_method(_MD("remove_exception_rid","rid"),&RayCast2D::remove_exception_rid);
+	ObjectTypeDB::bind_method(_MD("remove_exception","node"),&RayCast2D::remove_exception);
+
+	ObjectTypeDB::bind_method(_MD("clear_exceptions"),&RayCast2D::clear_exceptions);
+
+	ObjectTypeDB::bind_method(_MD("set_layer_mask","mask"),&RayCast2D::set_layer_mask);
+	ObjectTypeDB::bind_method(_MD("get_layer_mask"),&RayCast2D::get_layer_mask);
+
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL,"enabled"),_SCS("set_enabled"),_SCS("is_enabled"));
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2,"cast_to"),_SCS("set_cast_to"),_SCS("get_cast_to"));
+	ADD_PROPERTY(PropertyInfo(Variant::INT,"layer_mask",PROPERTY_HINT_ALL_FLAGS),_SCS("set_layer_mask"),_SCS("get_layer_mask"));
 }
 
 RayCast2D::RayCast2D() {
@@ -194,5 +252,6 @@ RayCast2D::RayCast2D() {
 	against=0;
 	collided=false;
 	against_shape=0;
+	layer_mask=1;
 	cast_to=Vector2(0,50);
 }

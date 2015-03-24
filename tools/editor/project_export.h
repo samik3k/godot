@@ -40,7 +40,7 @@
 #include "os/dir_access.h"
 #include "os/thread.h"
 #include "scene/gui/option_button.h"
-#include "scene/gui/empty_control.h"
+
 #include "scene/gui/slider.h"
 #include "tools/editor/editor_file_system.h"
 #include "property_editor.h"
@@ -80,10 +80,12 @@ private:
 
 	Tree * tree;
 
+	FileDialog *pck_export;
 	FileDialog *file_export;
 	CheckButton *file_export_check;
 	LineEdit *file_export_password;
 
+	Button *button_export;
 	String _delete_attempt;
 
 	bool updating;
@@ -108,6 +110,7 @@ private:
 	VBoxContainer *image_vb;
 	OptionButton *image_action;
 	HSlider *image_quality;
+	SpinBox *image_shrink;
 	Tree *image_formats;
 	Vector<TreeItem*> formats;
 
@@ -129,6 +132,12 @@ private:
 	TextureFrame *atlas_preview_frame;
 
 
+	VBoxContainer *script_vbox;
+	OptionButton *script_mode;
+	LineEdit *script_key;
+
+
+
 	void _export_mode_changed(int p_idx);
 	void _prop_edited(String what);
 
@@ -148,6 +157,8 @@ private:
 
 	void _quality_edited(float what);
 	void _image_export_edited(int what);
+	void _shrink_edited(float what);
+
 	void _update_group_list();
 	void _select_group(const String& p_by_name);
 
@@ -161,8 +172,13 @@ private:
 	void _group_select_none();
 	void _group_del(Object *item,int p_column, int p_button);
 
+	bool updating_script;
+	void _update_script();
+	void _script_edited(Variant v);
 	void _export_action(const String& p_file);
+	void _export_action_pck(const String& p_file);
 	void ok_pressed();
+	void custom_action(const String&);
 
 	void _save_export_cfg();
 	void _format_toggled();

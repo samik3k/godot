@@ -32,18 +32,32 @@ StreamPeerTCP* (*StreamPeerTCP::_create)()=NULL;
 
 void StreamPeerTCP::_bind_methods() {
 
-	ObjectTypeDB::bind_method(_MD("connect","host","ip"),&StreamPeerTCP::connect);
+	ObjectTypeDB::bind_method(_MD("connect","host","port"),&StreamPeerTCP::connect);
 	ObjectTypeDB::bind_method(_MD("is_connected"),&StreamPeerTCP::is_connected);
+	ObjectTypeDB::bind_method(_MD("get_status"),&StreamPeerTCP::get_status);
 	ObjectTypeDB::bind_method(_MD("get_connected_host"),&StreamPeerTCP::get_connected_host);
 	ObjectTypeDB::bind_method(_MD("get_connected_port"),&StreamPeerTCP::get_connected_port);
 	ObjectTypeDB::bind_method(_MD("disconnect"),&StreamPeerTCP::disconnect);
+
+	BIND_CONSTANT( STATUS_NONE );
+	BIND_CONSTANT( STATUS_CONNECTING );
+	BIND_CONSTANT( STATUS_CONNECTED );
+	BIND_CONSTANT( STATUS_ERROR );
+
 }
 
-Ref<StreamPeerTCP> StreamPeerTCP::create() {
+Ref<StreamPeerTCP> StreamPeerTCP::create_ref() {
 
 	if (!_create)
 		return Ref<StreamPeerTCP>();
 	return Ref<StreamPeerTCP>(_create());
+}
+
+StreamPeerTCP* StreamPeerTCP::create() {
+
+	if (!_create)
+		return NULL;
+	return _create();
 }
 
 StreamPeerTCP::StreamPeerTCP() {

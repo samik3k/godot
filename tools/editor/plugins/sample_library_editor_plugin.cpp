@@ -47,7 +47,7 @@ void SampleLibraryEditor::_notification(int p_what) {
 
 	}
 
-	if (p_what==NOTIFICATION_ENTER_SCENE) {
+	if (p_what==NOTIFICATION_ENTER_TREE) {
 		play->set_icon( get_icon("Play","EditorIcons") );
 		stop->set_icon( get_icon("Stop","EditorIcons") );
 		load->set_icon( get_icon("Folder","EditorIcons") );
@@ -129,7 +129,7 @@ void SampleLibraryEditor::_button_pressed(Object *p_item,int p_column, int p_id)
 		player->play(name,true);
 	} else if (p_column==1) {
 
-		get_scene()->get_root()->get_child(0)->call("_resource_selected",sample_library->get_sample(name));
+		get_tree()->get_root()->get_child(0)->call("_resource_selected",sample_library->get_sample(name));
 
 	}
 
@@ -186,7 +186,7 @@ void SampleLibraryEditor::_item_edited() {
 
 		Ref<Sample> samp = sample_library->get_sample(tree->get_selected()->get_metadata(0));
 
-		get_scene()->get_root()->get_child(0)->call("_resource_selected",samp);
+		get_tree()->get_root()->get_child(0)->call("_resource_selected",samp);
 	}
 
 
@@ -262,7 +262,7 @@ void SampleLibraryEditor::_update_library() {
 		ti->set_editable(2,false);
 		ti->set_selectable(2,false);
 		Ref<Sample> s = sample_library->get_sample(E->get());
-		ti->set_text(2,String()+/*itos(s->get_length())+" frames ("+String::num(s->get_length()/(float)s->get_mix_rate(),2)+" s), "+*/(s->get_format()==Sample::FORMAT_PCM16?"16 Bits, ":"8 bits, ")+(s->is_stereo()?"Stereo":"Mono"));
+		ti->set_text(2,String()+/*itos(s->get_length())+" frames ("+String::num(s->get_length()/(float)s->get_mix_rate(),2)+" s), "+*/(s->get_format()==Sample::FORMAT_PCM16?"16 Bits, ":(s->get_format()==Sample::FORMAT_PCM8?"8 bits, ":"IMA-ADPCM,"))+(s->is_stereo()?"Stereo":"Mono"));
 
 		ti->set_cell_mode(3,TreeItem::CELL_MODE_RANGE);
 		ti->set_range_config(3,-60,24,0.01);

@@ -50,6 +50,8 @@ protected:
 	Rect2 aabb;
 	BuildMode build_mode;
 	Vector<Point2> polygon;
+	bool trigger;
+	bool unparenting;
 
 	void _add_to_collision_object(Object *p_obj);
 	void _update_parent();
@@ -59,6 +61,9 @@ protected:
 	void _notification(int p_what);
 	static void _bind_methods();
 public:
+
+	void set_trigger(bool p_trigger);
+	bool is_trigger() const;
 
 	void set_build_mode(BuildMode p_mode);
 	BuildMode get_build_mode() const;

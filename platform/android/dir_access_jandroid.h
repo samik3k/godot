@@ -60,6 +60,7 @@ public:
 	virtual bool list_dir_begin(); ///< This starts dir listing
 	virtual String get_next();
 	virtual bool current_is_dir() const;
+	virtual bool current_is_hidden() const;
 	virtual void list_dir_end(); ///<
 
 	virtual int get_drive_count();
@@ -70,6 +71,7 @@ public:
 
 
 	virtual bool file_exists(String p_file);
+	virtual bool dir_exists(String p_dir);
 
 	virtual Error make_dir(String p_dir);
 
